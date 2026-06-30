@@ -29,6 +29,10 @@ BOT_ADMINS: list[int] = [
 # 对话记忆
 MEMORY_WINDOW: int = int(os.getenv("MEMORY_WINDOW", "20"))
 
+# 群聊观察
+GROUP_OBSERVE_WINDOW: int = int(os.getenv("GROUP_OBSERVE_WINDOW", "20"))
+GROUP_OBSERVE_DELAY: float = float(os.getenv("GROUP_OBSERVE_DELAY", "2.5"))
+
 # 数据目录
 DATA_DIR = BASE_DIR / "data"
 MEMORY_DIR = DATA_DIR / "memory"
