@@ -1,0 +1,14 @@
+{
+  "host": "127.0.0.1",
+  "port": 6099,
+  "token": "",
+  "loginRate": 10,
+  "autoLoginAccount": "",
+  "disableWebUI": true,
+  "accessControlMode": "none",
+  "ipWhitelist": [],
+  "ipBlacklist": [],
+  "enableXForwardedFor": false,
+  "enable2FA": false,
+  "totpSecret": ""
+}

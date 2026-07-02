@@ -3,6 +3,7 @@ from __future__ import annotations
 import nonebot
 
 from lingxuan.config import get_runtime_config, validate_config
+from lingxuan.user_memory import ensure_user_memory_initialized
 
 
 async def startup_check() -> None:
@@ -12,6 +13,7 @@ async def startup_check() -> None:
     logger.info("灵轩配置摘要: {}", cfg)
     for msg in issues:
         logger.warning("配置检查: {}", msg)
+    ensure_user_memory_initialized()
     if not issues:
         logger.info("配置检查通过")
 

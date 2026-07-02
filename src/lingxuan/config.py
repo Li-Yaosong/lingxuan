@@ -33,12 +33,29 @@ class Settings:
     bot_admins: list[int] = field(default_factory=list)
     memory_window: int = 20
     group_observe_window: int = 20
-    group_observe_delay: float = 2.5
+    group_observe_delay: float = 1.5
     group_observe_cooldown: float = 30.0
+    group_burst_merge_window: float = 10.0
+    group_followup_window: float = 60.0
+    group_chat_context: int = 6
+    group_chat_max_tokens: int = 512
+    enable_stream_chunk: bool = True
+    group_msg_chunk_max: int = 35
+    group_msg_chunk_min: int = 6
+    group_msg_chunk_limit: int = 6
+    group_chunk_delay_min: float = 0.4
+    group_chunk_delay_max: float = 1.2
     enable_private_chat: bool = True
     enable_group_chat: bool = True
     enable_group_observe: bool = True
     enable_memory_summary: bool = True
+    enable_user_memory: bool = True
+    user_memory_burst_merge: float = 3.0
+    user_memory_max_facts: int = 30
+    enable_user_cognition_refine: bool = True
+    user_cognition_refine_interval: int = 5
+    user_cognition_refine_delay: float = 2.0
+    user_cognition_max_chars: int = 150
     data_dir: Path = field(default_factory=lambda: BASE_DIR / "data")
 
     @classmethod
@@ -53,12 +70,29 @@ class Settings:
             bot_admins=_parse_admins(os.getenv("BOT_ADMINS", "")),
             memory_window=int(os.getenv("MEMORY_WINDOW", "20")),
             group_observe_window=int(os.getenv("GROUP_OBSERVE_WINDOW", "20")),
-            group_observe_delay=float(os.getenv("GROUP_OBSERVE_DELAY", "2.5")),
+            group_observe_delay=float(os.getenv("GROUP_OBSERVE_DELAY", "1.5")),
             group_observe_cooldown=float(os.getenv("GROUP_OBSERVE_COOLDOWN", "30")),
+            group_burst_merge_window=float(os.getenv("GROUP_BURST_MERGE_WINDOW", "10")),
+            group_followup_window=float(os.getenv("GROUP_FOLLOWUP_WINDOW", "60")),
+            group_chat_context=int(os.getenv("GROUP_CHAT_CONTEXT", "6")),
+            group_chat_max_tokens=int(os.getenv("GROUP_CHAT_MAX_TOKENS", "512")),
+            enable_stream_chunk=_env_bool("ENABLE_STREAM_CHUNK", True),
+            group_msg_chunk_max=int(os.getenv("GROUP_MSG_CHUNK_MAX", "35")),
+            group_msg_chunk_min=int(os.getenv("GROUP_MSG_CHUNK_MIN", "6")),
+            group_msg_chunk_limit=int(os.getenv("GROUP_MSG_CHUNK_LIMIT", "6")),
+            group_chunk_delay_min=float(os.getenv("GROUP_CHUNK_DELAY_MIN", "0.4")),
+            group_chunk_delay_max=float(os.getenv("GROUP_CHUNK_DELAY_MAX", "1.2")),
             enable_private_chat=_env_bool("ENABLE_PRIVATE_CHAT", True),
             enable_group_chat=_env_bool("ENABLE_GROUP_CHAT", True),
             enable_group_observe=_env_bool("ENABLE_GROUP_OBSERVE", True),
             enable_memory_summary=_env_bool("ENABLE_MEMORY_SUMMARY", True),
+            enable_user_memory=_env_bool("ENABLE_USER_MEMORY", True),
+            user_memory_burst_merge=float(os.getenv("USER_MEMORY_BURST_MERGE", "3.0")),
+            user_memory_max_facts=int(os.getenv("USER_MEMORY_MAX_FACTS", "30")),
+            enable_user_cognition_refine=_env_bool("ENABLE_USER_COGNITION_REFINE", True),
+            user_cognition_refine_interval=int(os.getenv("USER_COGNITION_REFINE_INTERVAL", "5")),
+            user_cognition_refine_delay=float(os.getenv("USER_COGNITION_REFINE_DELAY", "2.0")),
+            user_cognition_max_chars=int(os.getenv("USER_COGNITION_MAX_CHARS", "150")),
         )
 
     @property
@@ -80,10 +114,27 @@ MEMORY_WINDOW: int = settings.memory_window
 GROUP_OBSERVE_WINDOW: int = settings.group_observe_window
 GROUP_OBSERVE_DELAY: float = settings.group_observe_delay
 GROUP_OBSERVE_COOLDOWN: float = settings.group_observe_cooldown
+GROUP_BURST_MERGE_WINDOW: float = settings.group_burst_merge_window
+GROUP_FOLLOWUP_WINDOW: float = settings.group_followup_window
+GROUP_CHAT_CONTEXT: int = settings.group_chat_context
+GROUP_CHAT_MAX_TOKENS: int = settings.group_chat_max_tokens
+ENABLE_STREAM_CHUNK: bool = settings.enable_stream_chunk
+GROUP_MSG_CHUNK_MAX: int = settings.group_msg_chunk_max
+GROUP_MSG_CHUNK_MIN: int = settings.group_msg_chunk_min
+GROUP_MSG_CHUNK_LIMIT: int = settings.group_msg_chunk_limit
+GROUP_CHUNK_DELAY_MIN: float = settings.group_chunk_delay_min
+GROUP_CHUNK_DELAY_MAX: float = settings.group_chunk_delay_max
 ENABLE_PRIVATE_CHAT: bool = settings.enable_private_chat
 ENABLE_GROUP_CHAT: bool = settings.enable_group_chat
 ENABLE_GROUP_OBSERVE: bool = settings.enable_group_observe
 ENABLE_MEMORY_SUMMARY: bool = settings.enable_memory_summary
+ENABLE_USER_MEMORY: bool = settings.enable_user_memory
+USER_MEMORY_BURST_MERGE: float = settings.user_memory_burst_merge
+USER_MEMORY_MAX_FACTS: int = settings.user_memory_max_facts
+ENABLE_USER_COGNITION_REFINE: bool = settings.enable_user_cognition_refine
+USER_COGNITION_REFINE_INTERVAL: int = settings.user_cognition_refine_interval
+USER_COGNITION_REFINE_DELAY: float = settings.user_cognition_refine_delay
+USER_COGNITION_MAX_CHARS: int = settings.user_cognition_max_chars
 DATA_DIR = settings.data_dir
 MEMORY_DIR = settings.memory_dir
 
@@ -92,6 +143,8 @@ _FEATURE_MAP = {
     "enable_group_chat": lambda: settings.enable_group_chat,
     "enable_group_observe": lambda: settings.enable_group_observe,
     "enable_memory_summary": lambda: settings.enable_memory_summary,
+    "enable_user_memory": lambda: settings.enable_user_memory,
+    "enable_user_cognition_refine": lambda: settings.enable_user_cognition_refine,
 }
 
 
@@ -136,6 +189,8 @@ def get_runtime_config() -> dict[str, Any]:
         "enable_group_chat": settings.enable_group_chat,
         "enable_group_observe": settings.enable_group_observe,
         "enable_memory_summary": settings.enable_memory_summary,
+        "enable_user_memory": settings.enable_user_memory,
+        "enable_user_cognition_refine": settings.enable_user_cognition_refine,
     }
 
 

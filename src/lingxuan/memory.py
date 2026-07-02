@@ -87,16 +87,30 @@ def save_history(session_id: str, history: list[dict[str, str]]) -> None:
     save_session(session_id, session)
 
 
-def append_message(session_id: str, role: str, content: str) -> None:
+def append_message(
+    session_id: str,
+    role: str,
+    content: str,
+    *,
+    user_id: int | None = None,
+) -> None:
     session = load_session(session_id)
-    session.history.append({"role": role, "content": content})
+    msg: dict[str, Any] = {"role": role, "content": content}
+    if user_id is not None:
+        msg["user_id"] = user_id
+    session.history.append(msg)
     save_session(session_id, session)
 
 
-def clear_history(session_id: str) -> None:
+def clear_history(session_id: str, *, clear_user_profiles: bool = False) -> None:
     path = _memory_path(session_id)
     if path.exists():
         path.unlink()
+    if clear_user_profiles:
+        from lingxuan.user_memory import clear_user_profile, list_user_profiles
+
+        for uid in list_user_profiles():
+            clear_user_profile(uid)
 
 
 def update_meta(session_id: str, **kwargs: Any) -> None:
@@ -133,3 +147,37 @@ def user_session(user_id: int) -> str:
 
 def group_session(group_id: int) -> str:
     return f"group_{group_id}"
+
+
+def get_entities(session_id: str) -> dict[str, int]:
+    raw = load_session(session_id).meta.get("entities", {})
+    if not isinstance(raw, dict):
+        return {}
+    result: dict[str, int] = {}
+    for name, uid in raw.items():
+        try:
+            result[str(name)] = int(uid)
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def merge_entity(session_id: str, name: str, user_id: int) -> None:
+    name = name.strip()
+    if not name or not user_id:
+        return
+    session = load_session(session_id)
+    entities = session.meta.setdefault("entities", {})
+    if not isinstance(entities, dict):
+        entities = {}
+        session.meta["entities"] = entities
+    entities[name] = user_id
+    save_session(session_id, session)
+
+
+def format_entities_for_prompt(session_id: str) -> str:
+    entities = get_entities(session_id)
+    if not entities:
+        return ""
+    lines = [f"- {name}: QQ {uid}" for name, uid in entities.items()]
+    return "【群成员昵称】\n" + "\n".join(lines)

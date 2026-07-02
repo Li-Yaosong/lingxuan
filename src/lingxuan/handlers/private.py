@@ -7,6 +7,7 @@ from lingxuan.admin import CommandContext, parse_command, run_command
 from lingxuan.config import BOT_ADMINS, ENABLE_PRIVATE_CHAT
 from lingxuan.llm import chat, schedule_summarize
 from lingxuan.memory import append_message, update_meta, user_session
+from lingxuan.user_memory import on_user_message, schedule_cognition_refine
 
 private_handler = nonebot.on_type(PrivateMessageEvent, priority=10, block=True)
 
@@ -37,10 +38,22 @@ async def handle_private(event: PrivateMessageEvent) -> None:
             return
 
     update_meta(session_id, nickname=nickname)
-    append_message(session_id, "user", user_message)
+    on_user_message(
+        event.user_id,
+        user_message,
+        nickname=nickname,
+        is_private=True,
+        session_id=session_id,
+    )
+    append_message(session_id, "user", user_message, user_id=event.user_id)
 
-    reply = await chat(session_id, is_group=False)
+    reply = await chat(session_id, is_group=False, primary_user_id=event.user_id)
     append_message(session_id, "assistant", reply)
+
+    schedule_cognition_refine(
+        event.user_id,
+        recent_exchange=f"用户: {user_message}\n灵轩: {reply}",
+    )
 
     await private_handler.finish(reply)
     schedule_summarize(session_id)
