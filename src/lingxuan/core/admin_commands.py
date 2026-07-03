@@ -14,6 +14,7 @@ from typing import Protocol
 
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.messaging import SessionId
+from lingxuan.settings_defaults import mask_secret
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +203,7 @@ class AdminCommandService:
 
         # API key (masked) — aligns with MVP
         api_key = str(self._config.get("OPENAI_API_KEY") or "")
-        masked = _mask_secret(api_key)
+        masked = mask_secret(api_key)
         lines.append(f"API Key: {masked}")
 
         return "\n".join(lines)
@@ -289,17 +290,3 @@ class AdminCommandService:
             return header + "\n观察缓冲为空"
         lines = [f"[{e.nickname}]: {e.text}" for e in entries]
         return header + "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _mask_secret(value: str) -> str:
-    """Mask a secret value — aligns with MVP ``mask_api_key``."""
-    if not value:
-        return "(未配置)"
-    if len(value) <= 4:
-        return "****"
-    return f"{value[:2]}****{value[-2:]}"

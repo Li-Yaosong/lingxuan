@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 
 
 @dataclass

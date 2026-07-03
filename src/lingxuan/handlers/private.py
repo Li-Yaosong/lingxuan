@@ -4,7 +4,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import PrivateMessageEvent
 
 from lingxuan.admin import CommandContext, parse_command, run_command
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 from lingxuan.llm import chat, schedule_summarize
 from lingxuan.memory import append_message, update_meta, user_session
 from lingxuan.user_memory import on_user_message, schedule_cognition_refine

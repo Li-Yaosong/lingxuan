@@ -10,10 +10,9 @@ No framework / IO imports — all dependencies are injected protocols.
 
 from __future__ import annotations
 
-from typing import Protocol
-
 from lingxuan.core.admin_commands import AdminCommandService as AdminCommandService
 from lingxuan.core.admin_commands import CommandContext
+from lingxuan.core.group_reply_executor import GroupReplyExecutor
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
@@ -22,6 +21,7 @@ from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
+from lingxuan.protocols.memory import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     InboundMessage,
     MessageTransport,
@@ -32,152 +32,6 @@ from lingxuan.protocols.messaging import (
 )
 from lingxuan.protocols.plugins import HookType, PluginContext, PluginHost
 from lingxuan.protocols.repositories import SessionRepository, StoredMessage
-
-
-# ---------------------------------------------------------------------------
-# GroupReplyExecutor — shared by DialogueService (@-direct) and
-# ObservationService (passive reply).  Encapsulates prompt→LLM→planner→transport.
-# ---------------------------------------------------------------------------
-
-
-class GroupReplyExecutor:
-    """Build messages, stream LLM, plan chunks, send via transport.
-
-    Returns the full reply text so the caller can persist it to memory.
-    Shared between DialogueService (direct-@ reply) and ObservationService
-    (passive observation reply).
-    """
-
-    def __init__(
-        self,
-        prompt: PromptBuilder,
-        llm: LLMProvider,
-        planner: ReplyPlanner,
-        transport: MessageTransport,
-        sessions: SessionRepository,
-        config: ConfigProvider,
-    ) -> None:
-        self._prompt = prompt
-        self._llm = llm
-        self._planner = planner
-        self._transport = transport
-        self._sessions = sessions
-        self._config = config
-
-    @property
-    def _group_chat_context(self) -> int:
-        return self._config.get_int("GROUP_CHAT_CONTEXT")
-
-    @property
-    def _group_chat_max_tokens(self) -> int:
-        return self._config.get_int("GROUP_CHAT_MAX_TOKENS")
-
-    async def execute(
-        self,
-        session_id: SessionId,
-        observation_text: str | None = None,
-        at_user_id: int | None = None,
-        primary_user_id: int | None = None,
-    ) -> str:
-        """Generate and send a group reply. Returns the full reply text.
-
-        When *observation_text* is ``None`` (direct-@ path), builds a simple
-        group-context prompt without an extra observation block — the user
-        message is already in history.  When non-``None`` (observation path),
-        uses it as the extra user block.
-        """
-        history = await self._sessions.load_history(
-            session_id, limit=self._group_chat_context
-        )
-        summary = await self._sessions.get_summary(session_id)
-
-        extra_user: str | None = None
-        if observation_text is not None:
-            extra_user = build_group_reply_user(observation_text)
-
-        messages = self._prompt.build_context_messages(
-            is_group=True,
-            history=history,
-            summary=summary,
-            extra_user=extra_user,
-            history_limit=self._group_chat_context,
-        )
-
-        # LLM stream → planner → transport
-        reply_target = ReplyTarget(session_id=session_id, at_user_id=at_user_id)
-        token_iter = self._llm.chat_stream(
-            messages,
-            max_tokens=self._group_chat_max_tokens,
-        )
-        chunk_iter = self._planner.plan_stream(
-            token_iter, at_user_id=at_user_id
-        )
-        reply_text = await self._transport.send_stream(reply_target, chunk_iter)
-        return reply_text
-
-
-# ---------------------------------------------------------------------------
-# Protocol stubs for injected memory / user-memory services
-# (Phase 1: thin wrappers over MVP logic; Phase 2: Repository-based impl)
-# ---------------------------------------------------------------------------
-
-
-class MemoryService(Protocol):
-    """Session memory service protocol — Phase 1 placeholder interface.
-
-    Minimal surface needed by DialogueService.  The actual implementation
-    lives in adapters (wrapping the old MVP memory module until Phase 2
-    migrates to SessionRepository).
-    """
-
-    async def append_message(
-        self, session_id: SessionId, msg: StoredMessage
-    ) -> None: ...
-
-    async def update_meta(
-        self,
-        session_id: SessionId,
-        *,
-        nickname: str | None = None,
-        group_id: int | None = None,
-    ) -> None: ...
-
-    def schedule_summarize(self, session_id: SessionId) -> None: ...
-
-
-class UserMemoryService(Protocol):
-    """User memory service protocol — Phase 1 placeholder interface.
-
-    Minimal surface needed by DialogueService.  The actual implementation
-    wraps the old MVP user_memory module until Phase 2.
-    """
-
-    def on_user_message(
-        self,
-        user_id: int,
-        text: str,
-        *,
-        nickname: str = "",
-        is_private: bool = False,
-        session_id: SessionId | None = None,
-    ) -> None: ...
-
-    def schedule_cognition_refine(
-        self,
-        user_id: int,
-        *,
-        recent_exchange: str = "",
-    ) -> None: ...
-
-    def schedule_memory_extract(
-        self,
-        user_id: int,
-        text: str,
-        *,
-        nickname: str = "",
-        group_id: int | None = None,
-        context_lines: list[str] | None = None,
-    ) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +61,7 @@ class DialogueService:
         observation_store: ObservationStore,
         sessions: SessionRepository,
         clock: Clock,
+        group_executor: GroupReplyExecutor,
         plugin_host: PluginHost | None = None,
     ) -> None:
         self._config = config
@@ -224,15 +79,8 @@ class DialogueService:
         self._clock = clock
         self._plugin_host = plugin_host
 
-        # Shared executor for group replies
-        self._group_executor = GroupReplyExecutor(
-            prompt=prompt,
-            llm=llm,
-            planner=planner,
-            transport=transport,
-            sessions=sessions,
-            config=config,
-        )
+        # Shared executor for group replies (injected, same instance as ObservationService)
+        self._group_executor = group_executor
 
     # ── config helpers ────────────────────────────────────────────────────
 
@@ -466,7 +314,6 @@ class DialogueService:
             session_id=inbound.session_id,
             observation_text=None,  # direct-@ path: no observation prompt
             at_user_id=inbound.actor.user_id,
-            primary_user_id=inbound.actor.user_id,
         )
 
         if reply_text:

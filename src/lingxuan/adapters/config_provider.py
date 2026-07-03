@@ -14,20 +14,7 @@ from dotenv import load_dotenv
 
 from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe
 from lingxuan.protocols.repositories import ConfigRepository
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, parse_value
-
-
-def _mask_secret(value: str) -> str:
-    """Mask a secret value: keep first/last few chars, middle replaced with asterisks.
-
-    Mirrors MVP ``mask_api_key`` style: empty → "(未配置)", ≤4 chars → "****",
-    otherwise show first 2 + **** + last 2.
-    """
-    if not value:
-        return "(未配置)"
-    if len(value) <= 4:
-        return "****"
-    return f"{value[:2]}****{value[-2:]}"
+from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, mask_secret, parse_value
 
 
 class EnvConfigProvider:
@@ -178,7 +165,7 @@ class EnvConfigProvider:
             if mask_secrets:
                 spec = SETTINGS_BY_KEY.get(key)
                 if spec and spec.is_secret:
-                    result[key] = _mask_secret(str(value))
+                    result[key] = mask_secret(str(value))
                     continue
             result[key] = value
         return result

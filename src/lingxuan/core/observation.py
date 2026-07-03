@@ -13,16 +13,16 @@ from __future__ import annotations
 
 import asyncio
 
+from lingxuan.core.group_reply_executor import GroupReplyExecutor
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.prompting import PromptBuilder, build_judge_prompt, should_skip_reply_locally
-from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
+from lingxuan.protocols.memory import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     InboundMessage,
     ObservationEntry,
-    ReplyTarget,
     SessionId,
 )
 from lingxuan.protocols.repositories import SessionRepository, StoredMessage
@@ -81,6 +81,7 @@ def is_seeking_engagement(text: str) -> bool:
 # ObservationService
 # ---------------------------------------------------------------------------
 
+
 class ObservationService:
     """Group observation orchestration: debounce, rules, judge, reply.
 
@@ -91,20 +92,20 @@ class ObservationService:
     def __init__(
         self,
         store: ObservationStore,
+        executor: GroupReplyExecutor,
         llm: LLMProvider,
-        prompt: PromptBuilder,
-        planner: ReplyPlanner,
         sessions: SessionRepository,
-        transport: "MessageTransport",  # noqa: F821 — Protocol, avoid circular
+        memory: MemoryService,
+        user_memory: UserMemoryService,
         config: ConfigProvider,
         clock: Clock,
     ) -> None:
         self._store = store
+        self._executor = executor
         self._llm = llm
-        self._prompt = prompt
-        self._planner = planner
         self._sessions = sessions
-        self._transport = transport
+        self._memory = memory
+        self._user_memory = user_memory
         self._config = config
         self._clock = clock
 
@@ -464,50 +465,50 @@ class ObservationService:
         target: tuple[int, str],
         observation: str,
     ) -> None:
-        """Generate and send a group reply: prompt → LLM stream → plan → transport."""
+        """Generate and send a group reply via GroupReplyExecutor."""
         user_id, nickname = target
         session_id = SessionId(kind="group", peer_id=group_id)
 
-        # Build messages via PromptBuilder
-        history = await self._sessions.load_history(
-            session_id, limit=self._group_chat_context
+        reply_text = await self._executor.execute(
+            session_id=session_id,
+            observation_text=observation,
+            at_user_id=user_id,
         )
-        summary = await self._sessions.get_summary(session_id)
-        entities_text = self._format_entities_text(group_id, session_id)
-        extra_user = f"【当前群聊观察】\n{observation}\n\n请根据以上群聊内容，自然地回复正在和你说话的人。"
-        messages = self._prompt.build_context_messages(
-            is_group=True,
-            history=history,
-            summary=summary,
-            entities_text=entities_text,
-            extra_user=extra_user,
-            history_limit=self._group_chat_context,
-        )
-
-        # LLM stream → planner → transport
-        reply_target = ReplyTarget(session_id=session_id, at_user_id=user_id)
-        token_iter = self._llm.chat_stream(
-            messages,
-            max_tokens=self._config.get_int("GROUP_CHAT_MAX_TOKENS"),
-        )
-        chunk_iter = self._planner.plan_stream(
-            token_iter, at_user_id=user_id
-        )
-        reply_text = await self._transport.send_stream(reply_target, chunk_iter)
 
         if reply_text:
+            # Write assistant message to session memory
             await self._sessions.append_message(
                 session_id,
                 StoredMessage(role="assistant", content=reply_text),
             )
+
+            # Record bot message in observation buffer
             self._store.append_bot_message(group_id, reply_text)
+
+            # Mark observation state so scheduler won't re-trigger
             self.mark_last_trigger(group_id, reply_user_id=user_id)
 
-    def _format_entities_text(self, group_id: int, session_id: SessionId) -> str:
-        """Format group entities as context text (sync wrapper for async repo call).
+            # Schedule summarize (aligns with MVP direct-@ path)
+            self._memory.schedule_summarize(session_id)
 
-        This is a placeholder — the actual async call will be done in the
-        calling coroutine.  Returns empty string for now since entity
-        integration is deferred to Phase 2.
+            # Schedule cognition refine (aligns with MVP direct-@ path)
+            self._user_memory.schedule_cognition_refine(
+                user_id,
+                recent_exchange=_format_exchange(
+                    self._bot_name, nickname, observation, reply_text
+                ),
+            )
+
+    def _format_entities_text(self, group_id: int, session_id: SessionId) -> str:
+        """Format group entities as context text.
+
+        # TODO(Phase 2): implement with SessionRepository.get_entities
         """
         return ""
+
+
+def _format_exchange(
+    bot_name: str, nickname: str, user_text: str, bot_reply: str
+) -> str:
+    """Format a user-bot exchange for cognition refine — aligns with MVP."""
+    return f"用户[{nickname}]: {user_text}\n{bot_name}: {bot_reply}"

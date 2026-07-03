@@ -9,11 +9,9 @@ import pytest
 from lingxuan.core.admin_commands import AdminCommandService, CommandContext
 from lingxuan.core.dialogue import (
     DialogueService,
-    GroupReplyExecutor,
-    MemoryService,
-    UserMemoryService,
     _format_exchange,
 )
+from lingxuan.core.group_reply_executor import GroupReplyExecutor
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
@@ -207,13 +205,21 @@ def _make_dialogue(
 
     observation = ObservationService(
         store=obs_store,
+        executor=GroupReplyExecutor(
+            prompt=prompt, llm=llm, planner=planner,
+            transport=transport, sessions=sessions, config=config,
+        ),
         llm=llm,
-        prompt=prompt,
-        planner=planner,
         sessions=sessions,
-        transport=transport,
+        memory=memory,
+        user_memory=user_memory,
         config=config,
         clock=clock,
+    )
+
+    group_executor = GroupReplyExecutor(
+        prompt=prompt, llm=llm, planner=planner,
+        transport=transport, sessions=sessions, config=config,
     )
 
     svc = DialogueService(
@@ -230,6 +236,7 @@ def _make_dialogue(
         observation_store=obs_store,
         sessions=sessions,
         clock=clock,
+        group_executor=group_executor,
     )
     return (
         svc, config, llm, transport, memory, user_memory,

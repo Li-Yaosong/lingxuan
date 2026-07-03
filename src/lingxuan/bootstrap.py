@@ -9,9 +9,12 @@ Only this module (and adapters/onebot/*) may import nonebot.
 from __future__ import annotations
 
 import nonebot
-from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
-from lingxuan._config import set_global_config
+from lingxuan.adapters.onebot.lifecycle import (
+    init_nonebot,
+    register_lifecycle,
+    run,
+)
 from lingxuan.container import Container, build_container
 
 
@@ -50,8 +53,6 @@ async def _startup(container: Container) -> None:
     if not issues:
         logger.info("配置检查通过")
 
-    logger.info("灵轩已上线~")
-
 
 async def _shutdown(container: Container) -> None:
     """Shutdown hook: log departure."""
@@ -60,28 +61,24 @@ async def _shutdown(container: Container) -> None:
 
 def main() -> None:
     """Process entry point: build container → init nonebot → register lifecycle → run."""
-    # 1. Build Container
+    # 1. Build Container (set_global_config happens inside _build_config)
     container = build_container()
 
-    # 2. Set global ConfigProvider for legacy MVP modules
-    set_global_config(container.config)
+    # 2. Initialise NoneBot via lifecycle adapter
+    driver = init_nonebot(container.config)
 
-    # 2. Initialise NoneBot
-    driver_spec = container.config.get_str("DRIVER")
-    nonebot.init(driver=driver_spec, log_level="INFO")
-
-    driver = nonebot.get_driver()
-    driver.register_adapter(OneBotV11Adapter)
-
-    # 3. Lifecycle hooks
-    driver.on_startup(lambda: _startup(container))
-    driver.on_shutdown(lambda: _shutdown(container))
+    # 3. Register lifecycle hooks
+    register_lifecycle(
+        driver,
+        on_startup=lambda: _startup(container),
+        on_shutdown=lambda: _shutdown(container),
+    )
 
     # 4. Register inbound handler
     container.transport.start(container.dialogue.handle_inbound)
 
     # 5. Run
-    nonebot.run()
+    run()
 
 
 if __name__ == "__main__":

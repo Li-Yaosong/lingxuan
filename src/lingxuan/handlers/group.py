@@ -6,7 +6,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from lingxuan.admin import CommandContext, parse_command, run_command
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 from lingxuan.group_entities import learn_entities_from_entry
 from lingxuan.group_observer import (
     ObservationEntry,

@@ -10,10 +10,10 @@ from lingxuan.core.admin_commands import (
     MemoryAccess,
     ObservationAccess,
     UserMemoryAccess,
-    _mask_secret,
     parse_command,
 )
 from lingxuan.protocols.messaging import ObservationEntry, SessionId
+from lingxuan.settings_defaults import mask_secret
 from tests.fakes.config import FakeConfigProvider
 
 
@@ -625,22 +625,22 @@ class TestObserveCommand:
 
 
 # ===========================================================================
-# _mask_secret helper
+# mask_secret helper (unified in settings_defaults)
 # ===========================================================================
 
 
 class TestMaskSecret:
     def test_empty(self) -> None:
-        assert _mask_secret("") == "(未配置)"
+        assert mask_secret("") == "(未配置)"
 
     def test_short(self) -> None:
-        assert _mask_secret("ab") == "****"
+        assert mask_secret("ab") == "****"
 
     def test_exactly_4(self) -> None:
-        assert _mask_secret("abcd") == "****"
+        assert mask_secret("abcd") == "****"
 
     def test_long(self) -> None:
-        assert _mask_secret("sk-1234567890") == "sk****90"
+        assert mask_secret("sk-1234567890") == "sk****90"
 
     def test_5_chars(self) -> None:
-        assert _mask_secret("abcde") == "ab****de"
+        assert mask_secret("abcde") == "ab****de"

@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator
 import nonebot
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
 
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 
 logger = nonebot.logger
 

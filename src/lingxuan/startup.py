@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import nonebot
 
-from lingxuan._config import _cfg, mask_api_key
+from lingxuan.config import _cfg
 from lingxuan.user_memory import ensure_user_memory_initialized
 
 

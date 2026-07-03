@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lingxuan._config import _cfg, mask_api_key
+from lingxuan.config import _cfg, mask_api_key
 from lingxuan.group_observer import format_observation, get_observe_state, get_recent_entries
 from lingxuan.memory import clear_history, get_session_meta, get_summary, load_history
 from lingxuan.user_memory import (

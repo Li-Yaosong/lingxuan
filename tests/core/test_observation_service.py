@@ -7,6 +7,7 @@ import random
 
 import pytest
 
+from lingxuan.core.group_reply_executor import GroupReplyExecutor
 from lingxuan.core.observation import (
     ObservationService,
     is_directed_at_bot,
@@ -19,6 +20,7 @@ from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.protocols.llm import ChatMessage
+from lingxuan.protocols.memory import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     Actor,
     InboundMessage,
@@ -37,6 +39,38 @@ from tests.fakes.transport import FakeTransport
 # ── helpers ──────────────────────────────────────────────────────────────
 
 
+class _FakeMemoryService:
+    """Minimal fake MemoryService for observation tests."""
+
+    def __init__(self) -> None:
+        self.summarize_calls: list[SessionId] = []
+
+    async def append_message(self, session_id: SessionId, msg: StoredMessage) -> None:
+        pass
+
+    async def update_meta(self, session_id: SessionId, *, nickname: str | None = None, group_id: int | None = None) -> None:
+        pass
+
+    def schedule_summarize(self, session_id: SessionId) -> None:
+        self.summarize_calls.append(session_id)
+
+
+class _FakeUserMemoryService:
+    """Minimal fake UserMemoryService for observation tests."""
+
+    def __init__(self) -> None:
+        self.cognition_calls: list[int] = []
+
+    def on_user_message(self, user_id: int, text: str, *, nickname: str = "", is_private: bool = False, session_id: SessionId | None = None) -> None:
+        pass
+
+    def schedule_cognition_refine(self, user_id: int, *, recent_exchange: str = "") -> None:
+        self.cognition_calls.append(user_id)
+
+    def schedule_memory_extract(self, user_id: int, text: str, *, nickname: str = "", group_id: int | None = None, context_lines: list[str] | None = None) -> None:
+        pass
+
+
 def _make_service(
     **config_overrides: object,
 ) -> tuple[ObservationService, FakeClock, FakeLLMProvider, FakeTransport, ObservationStore, InMemorySessionRepository]:
@@ -49,13 +83,23 @@ def _make_service(
     persona = PersonaService(config)
     prompt = PromptBuilder(persona, config)
     planner = ReplyPlanner(config, rng=random.Random(42))
+    executor = GroupReplyExecutor(
+        prompt=prompt,
+        llm=llm,
+        planner=planner,
+        transport=transport,
+        sessions=sessions,
+        config=config,
+    )
+    memory = _FakeMemoryService()
+    user_memory = _FakeUserMemoryService()
     svc = ObservationService(
         store=store,
+        executor=executor,
         llm=llm,
-        prompt=prompt,
-        planner=planner,
         sessions=sessions,
-        transport=transport,
+        memory=memory,
+        user_memory=user_memory,
         config=config,
         clock=clock,
     )
@@ -238,7 +282,13 @@ class TestShortcircuitJudge:
         llm = FakeLLMProvider()
         sessions = InMemorySessionRepository()
         transport = FakeTransport()
-        svc = ObservationService(store, llm, prompt, planner, sessions, transport, config, clock)
+        executor = GroupReplyExecutor(
+            prompt=prompt, llm=llm, planner=planner,
+            transport=transport, sessions=sessions, config=config,
+        )
+        memory = _FakeMemoryService()
+        user_memory = _FakeUserMemoryService()
+        svc = ObservationService(store, executor, llm, sessions, memory, user_memory, config, clock)
 
         hit, reason = svc._should_shortcircuit_judge(100)
         assert hit is True

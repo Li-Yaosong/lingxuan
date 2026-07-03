@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 import nonebot
 from openai import AsyncOpenAI
 
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 from lingxuan.memory import (
     format_entities_for_prompt,
     load_history,

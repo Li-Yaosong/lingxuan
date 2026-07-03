@@ -20,7 +20,7 @@ from lingxuan.core.admin_commands import (
     ObservationAccess,
     UserMemoryAccess,
 )
-from lingxuan.core.dialogue import MemoryService, UserMemoryService
+from lingxuan.core.group_reply_executor import GroupReplyExecutor
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
@@ -30,6 +30,7 @@ from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
+from lingxuan.protocols.memory import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import MessageTransport, SessionId
 from lingxuan.protocols.repositories import SessionRepository, StoredMessage
 
@@ -341,7 +342,7 @@ class Container:
     # ── builders (one per service, called lazily) ─────────────────────────
 
     def _build_config(self) -> EnvConfigProvider:
-        from lingxuan._config import set_global_config
+        from lingxuan.config import set_global_config
 
         provider = EnvConfigProvider()
         set_global_config(provider)
@@ -371,6 +372,16 @@ class Container:
     def _build_observation_store(self) -> ObservationStore:
         return ObservationStore(self.config, self.clock)
 
+    def _build_group_executor(self) -> GroupReplyExecutor:
+        return GroupReplyExecutor(
+            prompt=self.prompt,
+            llm=self.llm,
+            planner=self.planner,
+            transport=self.transport,
+            sessions=self.session_repo,
+            config=self.config,
+        )
+
     def _build_session_repo(self) -> _LegacySessionRepository:
         return _LegacySessionRepository()
 
@@ -392,11 +403,11 @@ class Container:
     def _build_observation(self) -> ObservationService:
         return ObservationService(
             store=self.observation_store,
+            executor=self.group_executor,
             llm=self.llm,
-            prompt=self.prompt,
-            planner=self.planner,
             sessions=self.session_repo,
-            transport=self.transport,
+            memory=self.memory,
+            user_memory=self.user_memory,
             config=self.config,
             clock=self.clock,
         )
@@ -426,6 +437,7 @@ class Container:
             observation_store=self.observation_store,
             sessions=self.session_repo,
             clock=self.clock,
+            group_executor=self.group_executor,
         )
 
     # ── public properties (lazy singletons) ───────────────────────────────
@@ -465,6 +477,10 @@ class Container:
     @property
     def observation_store(self) -> ObservationStore:
         return self._get_or_build("observation_store")  # type: ignore[return-value]
+
+    @property
+    def group_executor(self) -> GroupReplyExecutor:
+        return self._get_or_build("group_executor")  # type: ignore[return-value]
 
     @property
     def session_repo(self) -> SessionRepository:

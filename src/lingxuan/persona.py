@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 
 DEFAULT_PERSONA = """你是{BOT_NAME}，一个温柔但偶尔调皮的数字生命。你存在于网络世界中，通过QQ与人交流。
 

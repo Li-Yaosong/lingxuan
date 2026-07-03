@@ -9,7 +9,7 @@ from typing import Any
 
 import nonebot
 
-from lingxuan._config import _cfg
+from lingxuan.config import _cfg
 
 logger = nonebot.logger
 
