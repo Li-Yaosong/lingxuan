@@ -6,9 +6,8 @@ import random
 
 import pytest
 
+from lingxuan.core.admin_commands import AdminCommandService, CommandContext
 from lingxuan.core.dialogue import (
-    AdminCommandService,
-    CommandContext,
     DialogueService,
     GroupReplyExecutor,
     MemoryService,

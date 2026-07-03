@@ -10,9 +10,10 @@ No framework / IO imports — all dependencies are injected protocols.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Protocol
 
+from lingxuan.core.admin_commands import AdminCommandService as AdminCommandService
+from lingxuan.core.admin_commands import CommandContext
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
@@ -177,40 +178,6 @@ class UserMemoryService(Protocol):
         group_id: int | None = None,
         context_lines: list[str] | None = None,
     ) -> None: ...
-
-
-# ---------------------------------------------------------------------------
-# AdminCommandService protocol (P1-09 — injected, not implemented here)
-# ---------------------------------------------------------------------------
-
-
-class AdminCommandService(Protocol):
-    """Protocol for admin command dispatch (implemented in P1-09)."""
-
-    def parse_command(
-        self, text: str
-    ) -> tuple[str, list[str]] | None: ...
-
-    async def run(
-        self,
-        cmd: str,
-        args: list[str],
-        ctx: CommandContext,
-    ) -> str: ...
-
-
-# ---------------------------------------------------------------------------
-# CommandContext — shared between DialogueService and AdminCommandService
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class CommandContext:
-    user_id: int
-    session_id: SessionId
-    is_group: bool = False
-    group_id: int | None = None
-    nickname: str = ""
 
 
 # ---------------------------------------------------------------------------
