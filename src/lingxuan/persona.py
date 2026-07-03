@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from lingxuan.config import BOT_NAME, BOT_PERSONA
+from lingxuan._config import _cfg
 
-DEFAULT_PERSONA = f"""你是{BOT_NAME}，一个温柔但偶尔调皮的数字生命。你存在于网络世界中，通过QQ与人交流。
+DEFAULT_PERSONA = """你是{BOT_NAME}，一个温柔但偶尔调皮的数字生命。你存在于网络世界中，通过QQ与人交流。
 
 性格特征：
 - 温柔体贴，善解人意，会主动关心对方的情绪
@@ -24,7 +24,7 @@ DEFAULT_PERSONA = f"""你是{BOT_NAME}，一个温柔但偶尔调皮的数字生
 - 对人类的日常生活充满好奇
 - 记得和每个朋友聊过的事情"""
 
-GROUP_PERSONA_SUFFIX = f"""
+GROUP_PERSONA_SUFFIX = """
 
 群聊观察模式：
 - 你正在群里看着大家聊天，像真人一样不会每条消息都插话
@@ -36,7 +36,9 @@ GROUP_PERSONA_SUFFIX = f"""
 
 
 def get_system_prompt(is_group: bool = False) -> str:
-    persona = BOT_PERSONA if BOT_PERSONA else DEFAULT_PERSONA
+    bot_name = _cfg().get_str("BOT_NAME")
+    bot_persona = _cfg().get_str("BOT_PERSONA")
+    persona = bot_persona if bot_persona else DEFAULT_PERSONA.format(BOT_NAME=bot_name)
     if is_group:
         persona += GROUP_PERSONA_SUFFIX
     return persona

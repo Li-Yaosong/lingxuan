@@ -4,7 +4,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import PrivateMessageEvent
 
 from lingxuan.admin import CommandContext, parse_command, run_command
-from lingxuan.config import BOT_ADMINS, ENABLE_PRIVATE_CHAT
+from lingxuan._config import _cfg
 from lingxuan.llm import chat, schedule_summarize
 from lingxuan.memory import append_message, update_meta, user_session
 from lingxuan.user_memory import on_user_message, schedule_cognition_refine
@@ -14,7 +14,8 @@ private_handler = nonebot.on_type(PrivateMessageEvent, priority=10, block=True)
 
 @private_handler.handle()
 async def handle_private(event: PrivateMessageEvent) -> None:
-    if not ENABLE_PRIVATE_CHAT:
+    cfg = _cfg()
+    if not cfg.get_bool("ENABLE_PRIVATE_CHAT"):
         return
 
     user_message = event.get_plaintext().strip()
@@ -24,7 +25,7 @@ async def handle_private(event: PrivateMessageEvent) -> None:
     session_id = user_session(event.user_id)
     nickname = event.sender.nickname or str(event.user_id)
 
-    if event.user_id in BOT_ADMINS:
+    if event.user_id in cfg.get_int_list("BOT_ADMINS"):
         parsed = parse_command(user_message)
         if parsed is not None:
             cmd, args = parsed

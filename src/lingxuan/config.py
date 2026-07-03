@@ -1,3 +1,19 @@
+"""DEPRECATED: Legacy MVP configuration module.
+
+This module is retained for reference only.  All new code should use
+``lingxuan._config._cfg()`` or inject ``ConfigProvider`` via constructor.
+The module-level uppercase constants and helper functions have been removed.
+This module will be deleted in Phase 2.
+"""
+
+import warnings
+
+warnings.warn(
+    "lingxuan.config is deprecated; use lingxuan._config._cfg() or ConfigProvider",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from __future__ import annotations
 
 import os
@@ -101,107 +117,3 @@ class Settings:
 
 
 settings = Settings.from_env()
-
-# 向后兼容的模块级导出
-DRIVER: str = settings.driver
-OPENAI_API_KEY: str = settings.openai_api_key
-OPENAI_BASE_URL: str = settings.openai_base_url
-OPENAI_MODEL: str = settings.openai_model
-BOT_NAME: str = settings.bot_name
-BOT_PERSONA: str = settings.bot_persona
-BOT_ADMINS: list[int] = settings.bot_admins
-MEMORY_WINDOW: int = settings.memory_window
-GROUP_OBSERVE_WINDOW: int = settings.group_observe_window
-GROUP_OBSERVE_DELAY: float = settings.group_observe_delay
-GROUP_OBSERVE_COOLDOWN: float = settings.group_observe_cooldown
-GROUP_BURST_MERGE_WINDOW: float = settings.group_burst_merge_window
-GROUP_FOLLOWUP_WINDOW: float = settings.group_followup_window
-GROUP_CHAT_CONTEXT: int = settings.group_chat_context
-GROUP_CHAT_MAX_TOKENS: int = settings.group_chat_max_tokens
-ENABLE_STREAM_CHUNK: bool = settings.enable_stream_chunk
-GROUP_MSG_CHUNK_MAX: int = settings.group_msg_chunk_max
-GROUP_MSG_CHUNK_MIN: int = settings.group_msg_chunk_min
-GROUP_MSG_CHUNK_LIMIT: int = settings.group_msg_chunk_limit
-GROUP_CHUNK_DELAY_MIN: float = settings.group_chunk_delay_min
-GROUP_CHUNK_DELAY_MAX: float = settings.group_chunk_delay_max
-ENABLE_PRIVATE_CHAT: bool = settings.enable_private_chat
-ENABLE_GROUP_CHAT: bool = settings.enable_group_chat
-ENABLE_GROUP_OBSERVE: bool = settings.enable_group_observe
-ENABLE_MEMORY_SUMMARY: bool = settings.enable_memory_summary
-ENABLE_USER_MEMORY: bool = settings.enable_user_memory
-USER_MEMORY_BURST_MERGE: float = settings.user_memory_burst_merge
-USER_MEMORY_MAX_FACTS: int = settings.user_memory_max_facts
-ENABLE_USER_COGNITION_REFINE: bool = settings.enable_user_cognition_refine
-USER_COGNITION_REFINE_INTERVAL: int = settings.user_cognition_refine_interval
-USER_COGNITION_REFINE_DELAY: float = settings.user_cognition_refine_delay
-USER_COGNITION_MAX_CHARS: int = settings.user_cognition_max_chars
-DATA_DIR = settings.data_dir
-MEMORY_DIR = settings.memory_dir
-
-_FEATURE_MAP = {
-    "enable_private_chat": lambda: settings.enable_private_chat,
-    "enable_group_chat": lambda: settings.enable_group_chat,
-    "enable_group_observe": lambda: settings.enable_group_observe,
-    "enable_memory_summary": lambda: settings.enable_memory_summary,
-    "enable_user_memory": lambda: settings.enable_user_memory,
-    "enable_user_cognition_refine": lambda: settings.enable_user_cognition_refine,
-}
-
-
-def is_feature_enabled(feature_name: str) -> bool:
-    fn = _FEATURE_MAP.get(feature_name)
-    return fn() if fn else False
-
-
-def get_admin_ids() -> list[int]:
-    return list(settings.bot_admins)
-
-
-def get_llm_config() -> dict[str, str]:
-    return {
-        "api_key": settings.openai_api_key,
-        "base_url": settings.openai_base_url,
-        "model": settings.openai_model,
-    }
-
-
-def mask_api_key(key: str) -> str:
-    if not key:
-        return "(未配置)"
-    if len(key) <= 4:
-        return "****"
-    return f"****{key[-4:]}"
-
-
-def get_runtime_config() -> dict[str, Any]:
-    return {
-        "driver": settings.driver,
-        "bot_name": settings.bot_name,
-        "openai_model": settings.openai_model,
-        "openai_base_url": settings.openai_base_url,
-        "openai_api_key": mask_api_key(settings.openai_api_key),
-        "bot_admins": settings.bot_admins,
-        "memory_window": settings.memory_window,
-        "group_observe_window": settings.group_observe_window,
-        "group_observe_delay": settings.group_observe_delay,
-        "group_observe_cooldown": settings.group_observe_cooldown,
-        "enable_private_chat": settings.enable_private_chat,
-        "enable_group_chat": settings.enable_group_chat,
-        "enable_group_observe": settings.enable_group_observe,
-        "enable_memory_summary": settings.enable_memory_summary,
-        "enable_user_memory": settings.enable_user_memory,
-        "enable_user_cognition_refine": settings.enable_user_cognition_refine,
-    }
-
-
-def validate_config() -> list[str]:
-    issues: list[str] = []
-    if not settings.openai_api_key:
-        issues.append("OPENAI_API_KEY 未配置，LLM 功能将不可用")
-    else:
-        parsed = urlparse(settings.openai_base_url)
-        if not parsed.scheme or not parsed.netloc:
-            issues.append(f"OPENAI_BASE_URL 格式无效: {settings.openai_base_url}")
-    if not settings.bot_admins:
-        issues.append("BOT_ADMINS 未配置，管理员命令将不可用")
-    return issues

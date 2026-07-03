@@ -11,22 +11,25 @@ from typing import Any
 
 import nonebot
 
-from lingxuan.config import (
-    ENABLE_USER_COGNITION_REFINE,
-    ENABLE_USER_MEMORY,
-    MEMORY_DIR,
-    USER_COGNITION_MAX_CHARS,
-    USER_COGNITION_REFINE_DELAY,
-    USER_COGNITION_REFINE_INTERVAL,
-    USER_MEMORY_BURST_MERGE,
-    USER_MEMORY_MAX_FACTS,
-)
+from lingxuan._config import _cfg
 
 logger = nonebot.logger
 
-_USER_DIR = Path(MEMORY_DIR) / "users"
-_GRAPH_PATH = Path(MEMORY_DIR) / "social_graph.json"
-_MIGRATED_FLAG = Path(MEMORY_DIR) / ".user_memory_migrated"
+
+def _memory_dir() -> Path:
+    return Path(_cfg().get_str("DATA_ROOT")) / "memory"
+
+
+def _user_dir() -> Path:
+    return _memory_dir() / "users"
+
+
+def _graph_path() -> Path:
+    return _memory_dir() / "social_graph.json"
+
+
+def _migrated_flag() -> Path:
+    return _memory_dir() / ".user_memory_migrated"
 
 _STAGES = ("stranger", "acquaintance", "familiar", "close")
 _STAGE_LABELS = {
@@ -241,12 +244,12 @@ def _graph_to_dict(graph: SocialGraph) -> dict[str, Any]:
 
 
 def _ensure_user_dir() -> None:
-    _USER_DIR.mkdir(parents=True, exist_ok=True)
-    Path(MEMORY_DIR).mkdir(parents=True, exist_ok=True)
+    _user_dir().mkdir(parents=True, exist_ok=True)
+    _memory_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _user_path(user_id: int) -> Path:
-    return _USER_DIR / f"{user_id}.json"
+    return _user_dir() / f"{user_id}.json"
 
 
 # --- CRUD ---
@@ -266,10 +269,11 @@ def load_user_profile(user_id: int) -> UserProfile:
 
 def save_user_profile(profile: UserProfile) -> None:
     _ensure_user_dir()
+    max_facts = _cfg().get_int("USER_MEMORY_MAX_FACTS")
     active_facts = [f for f in profile.facts if f.active]
-    if len(active_facts) > USER_MEMORY_MAX_FACTS:
+    if len(active_facts) > max_facts:
         active_facts.sort(key=lambda f: f.learned_at)
-        keep_ids = {f.id for f in active_facts[-USER_MEMORY_MAX_FACTS:]}
+        keep_ids = {f.id for f in active_facts[-max_facts:]}
         for f in profile.facts:
             if f.active and f.id not in keep_ids:
                 f.active = False
@@ -281,10 +285,11 @@ def save_user_profile(profile: UserProfile) -> None:
 
 
 def load_social_graph() -> SocialGraph:
-    if not _GRAPH_PATH.exists():
+    gp = _graph_path()
+    if not gp.exists():
         return SocialGraph()
     try:
-        data = json.loads(_GRAPH_PATH.read_text(encoding="utf-8"))
+        data = json.loads(gp.read_text(encoding="utf-8"))
         return _graph_from_dict(data)
     except (json.JSONDecodeError, OSError):
         return SocialGraph()
@@ -292,7 +297,7 @@ def load_social_graph() -> SocialGraph:
 
 def save_social_graph(graph: SocialGraph) -> None:
     _ensure_user_dir()
-    _GRAPH_PATH.write_text(
+    _graph_path().write_text(
         json.dumps(_graph_to_dict(graph), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -307,8 +312,9 @@ def clear_user_profile(user_id: int) -> bool:
 
 
 def clear_social_graph() -> None:
-    if _GRAPH_PATH.exists():
-        _GRAPH_PATH.unlink()
+    gp = _graph_path()
+    if gp.exists():
+        gp.unlink()
 
 
 def clear_all_user_memory() -> int:
@@ -317,15 +323,17 @@ def clear_all_user_memory() -> int:
         if clear_user_profile(uid):
             count += 1
     clear_social_graph()
-    if _MIGRATED_FLAG.exists():
-        _MIGRATED_FLAG.unlink()
+    mf = _migrated_flag()
+    if mf.exists():
+        mf.unlink()
     return count
 
 
 def list_user_profiles() -> list[int]:
-    if not _USER_DIR.exists():
+    ud = _user_dir()
+    if not ud.exists():
         return []
-    return sorted(int(p.stem) for p in _USER_DIR.glob("*.json") if p.stem.isdigit())
+    return sorted(int(p.stem) for p in ud.glob("*.json") if p.stem.isdigit())
 
 
 # --- relationship stage ---
@@ -732,7 +740,7 @@ def schedule_memory_extract(
     context_lines: list[str] | None = None,
 ) -> None:
     """Schedule debounced LLM memory extraction for a message."""
-    if not ENABLE_USER_MEMORY:
+    if not _cfg().get_bool("ENABLE_USER_MEMORY"):
         return
 
     payload = {
@@ -748,7 +756,7 @@ def schedule_memory_extract(
         return
 
     async def _delayed() -> None:
-        await asyncio.sleep(USER_MEMORY_BURST_MERGE)
+        await asyncio.sleep(_cfg().get_float("USER_MEMORY_BURST_MERGE"))
         await _flush_extracts(user_id)
 
     _extract_tasks[user_id] = asyncio.create_task(_delayed())
@@ -774,14 +782,14 @@ _REFINE_PROMPT = """你是灵轩的记忆整理模块。根据以下信息，写
 
 
 def should_refine_cognition(profile: UserProfile, *, has_recent_exchange: bool = False) -> bool:
-    if not ENABLE_USER_COGNITION_REFINE:
+    if not _cfg().get_bool("ENABLE_USER_COGNITION_REFINE"):
         return False
     if has_recent_exchange:
         return True
     rel = profile.relationship
     cog = profile.cognition
     delta = rel.interaction_count - cog.interaction_at_update
-    if delta >= USER_COGNITION_REFINE_INTERVAL:
+    if delta >= _cfg().get_int("USER_COGNITION_REFINE_INTERVAL"):
         return True
     if cog.updated_at:
         for f in profile.facts:
@@ -821,7 +829,7 @@ async def refine_user_cognition(user_id: int, *, recent_exchange: str = "") -> s
         exchange_block = f"最近对话：\n{recent_exchange.strip()}\n"
 
     prompt = _REFINE_PROMPT.format(
-        max_chars=USER_COGNITION_MAX_CHARS,
+        max_chars=_cfg().get_int("USER_COGNITION_MAX_CHARS"),
         name=name,
         stage=stage_label(profile.relationship.stage),
         old_summary=profile.cognition.summary or "(初次认识，尚无认知)",
@@ -842,8 +850,9 @@ async def refine_user_cognition(user_id: int, *, recent_exchange: str = "") -> s
         logger.debug("cognition refine skipped uid={}", user_id)
         return profile.cognition.summary
 
-    if len(summary) > USER_COGNITION_MAX_CHARS:
-        summary = summary[:USER_COGNITION_MAX_CHARS]
+    max_chars = _cfg().get_int("USER_COGNITION_MAX_CHARS")
+    if len(summary) > max_chars:
+        summary = summary[:max_chars]
 
     profile.cognition.summary = summary
     profile.cognition.updated_at = _now_iso()
@@ -869,7 +878,7 @@ def schedule_cognition_refine(
     *,
     recent_exchange: str = "",
 ) -> None:
-    if not ENABLE_USER_MEMORY or not ENABLE_USER_COGNITION_REFINE:
+    if not _cfg().get_bool("ENABLE_USER_MEMORY") or not _cfg().get_bool("ENABLE_USER_COGNITION_REFINE"):
         return
 
     profile = load_user_profile(user_id)
@@ -885,7 +894,7 @@ def schedule_cognition_refine(
         return
 
     async def _delayed() -> None:
-        await asyncio.sleep(USER_COGNITION_REFINE_DELAY)
+        await asyncio.sleep(_cfg().get_float("USER_COGNITION_REFINE_DELAY"))
         await _flush_refine(user_id)
 
     _refine_tasks[user_id] = asyncio.create_task(_delayed())
@@ -903,7 +912,7 @@ def on_user_message(
     context_lines: list[str] | None = None,
 ) -> None:
     """Handle per-message user memory: touch, rules, and LLM extraction."""
-    if not ENABLE_USER_MEMORY:
+    if not _cfg().get_bool("ENABLE_USER_MEMORY"):
         return
     touch_user(
         user_id,
@@ -953,7 +962,7 @@ def format_user_context_for_prompt(
     *,
     is_private: bool = False,
 ) -> str:
-    if not ENABLE_USER_MEMORY:
+    if not _cfg().get_bool("ENABLE_USER_MEMORY"):
         return ""
 
     blocks: list[str] = []
@@ -1025,7 +1034,7 @@ def format_user_context_for_prompt(
 
 
 def format_user_brief(user_id: int) -> str:
-    if not ENABLE_USER_MEMORY:
+    if not _cfg().get_bool("ENABLE_USER_MEMORY"):
         return ""
     profile = load_user_profile(user_id)
     name = display_name(profile)
@@ -1060,12 +1069,13 @@ def format_user_profile_summary(user_id: int) -> str:
 
 def migrate_from_session_entities() -> int:
     """Scan existing group_*.json entities and bootstrap user profiles."""
-    if _MIGRATED_FLAG.exists():
+    mf = _migrated_flag()
+    if mf.exists():
         return 0
     count = 0
-    memory_dir = Path(MEMORY_DIR)
+    memory_dir = _memory_dir()
     if not memory_dir.exists():
-        _MIGRATED_FLAG.touch()
+        _migrated_flag().touch()
         return 0
     for path in memory_dir.glob("group_*.json"):
         try:
@@ -1083,11 +1093,11 @@ def migrate_from_session_entities() -> int:
                 continue
             sync_entity_to_graph(str(name), user_id, session_id)
             count += 1
-    _MIGRATED_FLAG.touch()
+    _migrated_flag().touch()
     logger.info("user_memory migrated {} entities from session files", count)
     return count
 
 
 def ensure_user_memory_initialized() -> None:
-    if ENABLE_USER_MEMORY:
+    if _cfg().get_bool("ENABLE_USER_MEMORY"):
         migrate_from_session_entities()

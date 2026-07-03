@@ -8,14 +8,7 @@ from collections.abc import AsyncIterator
 import nonebot
 from nonebot.adapters.onebot.v11 import Bot, MessageSegment
 
-from lingxuan.config import (
-    ENABLE_STREAM_CHUNK,
-    GROUP_CHUNK_DELAY_MAX,
-    GROUP_CHUNK_DELAY_MIN,
-    GROUP_MSG_CHUNK_LIMIT,
-    GROUP_MSG_CHUNK_MAX,
-    GROUP_MSG_CHUNK_MIN,
-)
+from lingxuan._config import _cfg
 
 logger = nonebot.logger
 
@@ -25,10 +18,15 @@ _SENTENCE_END = re.compile(r"([。！？；…\n]|[.!?])(?:\s|$)")
 def split_chunks(
     text: str,
     *,
-    max_len: int = GROUP_MSG_CHUNK_MAX,
-    min_len: int = GROUP_MSG_CHUNK_MIN,
-    limit: int = GROUP_MSG_CHUNK_LIMIT,
+    max_len: int | None = None,
+    min_len: int | None = None,
+    limit: int | None = None,
 ) -> list[str]:
+    cfg = _cfg()
+    max_len = max_len if max_len is not None else cfg.get_int("GROUP_MSG_CHUNK_MAX")
+    min_len = min_len if min_len is not None else cfg.get_int("GROUP_MSG_CHUNK_MIN")
+    limit = limit if limit is not None else cfg.get_int("GROUP_MSG_CHUNK_LIMIT")
+
     text = text.strip()
     if not text:
         return []
@@ -105,7 +103,8 @@ async def send_group_chunks(
     user_id: int,
     text: str,
 ) -> str:
-    chunks = split_chunks(text) if ENABLE_STREAM_CHUNK else [text]
+    cfg = _cfg()
+    chunks = split_chunks(text) if cfg.get_bool("ENABLE_STREAM_CHUNK") else [text]
     if not chunks:
         return ""
 
@@ -119,7 +118,7 @@ async def send_group_chunks(
             logger.info("reply sent group={} user={} chunk=1", group_id, user_id)
         if idx + 1 < len(chunks):
             await asyncio.sleep(
-                random.uniform(GROUP_CHUNK_DELAY_MIN, GROUP_CHUNK_DELAY_MAX)
+                random.uniform(cfg.get_float("GROUP_CHUNK_DELAY_MIN"), cfg.get_float("GROUP_CHUNK_DELAY_MAX"))
             )
     if len(chunks) > 1:
         logger.info("reply sent group={} user={} chunks={}", group_id, user_id, len(chunks))
@@ -132,7 +131,8 @@ async def send_group_stream(
     user_id: int,
     stream: AsyncIterator[str],
 ) -> str:
-    if not ENABLE_STREAM_CHUNK:
+    cfg = _cfg()
+    if not cfg.get_bool("ENABLE_STREAM_CHUNK"):
         parts: list[str] = []
         async for token in stream:
             parts.append(token)
@@ -142,14 +142,17 @@ async def send_group_stream(
     full = ""
     chunks_sent = 0
     first = True
+    chunk_max = cfg.get_int("GROUP_MSG_CHUNK_MAX")
+    chunk_min = cfg.get_int("GROUP_MSG_CHUNK_MIN")
+    chunk_limit = cfg.get_int("GROUP_MSG_CHUNK_LIMIT")
 
     async def _emit(chunk: str) -> None:
         nonlocal first, chunks_sent
         piece = chunk.strip()
-        if not piece or chunks_sent >= GROUP_MSG_CHUNK_LIMIT:
+        if not piece or chunks_sent >= chunk_limit:
             return
-        if len(piece) > GROUP_MSG_CHUNK_MAX:
-            piece = piece[:GROUP_MSG_CHUNK_MAX]
+        if len(piece) > chunk_max:
+            piece = piece[:chunk_max]
         if first:
             await bot.send_group_msg(
                 group_id=group_id,
@@ -160,25 +163,25 @@ async def send_group_stream(
         else:
             await bot.send_group_msg(group_id=group_id, message=piece)
         chunks_sent += 1
-        if chunks_sent < GROUP_MSG_CHUNK_LIMIT:
+        if chunks_sent < chunk_limit:
             await asyncio.sleep(
-                random.uniform(GROUP_CHUNK_DELAY_MIN, GROUP_CHUNK_DELAY_MAX)
+                random.uniform(cfg.get_float("GROUP_CHUNK_DELAY_MIN"), cfg.get_float("GROUP_CHUNK_DELAY_MAX"))
             )
 
     async for token in stream:
         buffer += token
         full += token
-        while chunks_sent < GROUP_MSG_CHUNK_LIMIT:
+        while chunks_sent < chunk_limit:
             chunk, buffer = _take_emit_chunk(
                 buffer,
-                max_len=GROUP_MSG_CHUNK_MAX,
-                min_len=GROUP_MSG_CHUNK_MIN,
+                max_len=chunk_max,
+                min_len=chunk_min,
             )
             if chunk is None:
                 break
             await _emit(chunk)
 
-    if buffer.strip() and chunks_sent < GROUP_MSG_CHUNK_LIMIT:
+    if buffer.strip() and chunks_sent < chunk_limit:
         await _emit(buffer)
 
     if chunks_sent > 1:

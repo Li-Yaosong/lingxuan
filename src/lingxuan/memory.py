@@ -6,9 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from lingxuan.config import MEMORY_DIR, MEMORY_WINDOW
-
-_MEMORY_DIR = Path(MEMORY_DIR)
+from lingxuan._config import _cfg
 
 
 @dataclass
@@ -19,12 +17,16 @@ class SessionData:
     meta: dict[str, Any] = field(default_factory=dict)
 
 
+def _memory_dir() -> Path:
+    return Path(_cfg().get_str("DATA_ROOT")) / "memory"
+
+
 def _memory_path(session_id: str) -> Path:
-    return _MEMORY_DIR / f"{session_id}.json"
+    return _memory_dir() / f"{session_id}.json"
 
 
 def _ensure_dir() -> None:
-    _MEMORY_DIR.mkdir(parents=True, exist_ok=True)
+    _memory_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _now_iso() -> str:
@@ -60,7 +62,8 @@ def load_session(session_id: str) -> SessionData:
 
 def save_session(session_id: str, session: SessionData) -> None:
     _ensure_dir()
-    session.history = session.history[-MEMORY_WINDOW * 2 :]
+    memory_window = _cfg().get_int("MEMORY_WINDOW")
+    session.history = session.history[-memory_window * 2 :]
     path = _memory_path(session_id)
     path.write_text(
         json.dumps(

@@ -6,7 +6,7 @@ import nonebot
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from lingxuan.admin import CommandContext, parse_command, run_command
-from lingxuan.config import BOT_ADMINS, BOT_NAME, ENABLE_GROUP_CHAT, ENABLE_GROUP_OBSERVE
+from lingxuan._config import _cfg
 from lingxuan.group_entities import learn_entities_from_entry
 from lingxuan.group_observer import (
     ObservationEntry,
@@ -140,12 +140,13 @@ def _ensure_observer(group_id: int) -> None:
 
 
 def _should_shortcircuit_judge(group_id: int) -> tuple[bool, str]:
+    bot_name = _cfg().get_str("BOT_NAME")
     if latest_user_at_bot(group_id):
         return True, "at_bot"
     if latest_user_replies_to_bot(group_id):
         return True, "reply_to_bot"
     last_text = get_last_user_text(group_id)
-    if BOT_NAME in last_text:
+    if bot_name in last_text:
         return True, "name_mention"
     if is_directed_at_bot(last_text):
         return True, "directed_request"
@@ -195,7 +196,7 @@ async def _send_group_reply(
 
 
 async def _observe_group(group_id: int) -> None:
-    if not ENABLE_GROUP_OBSERVE:
+    if not _cfg().get_bool("ENABLE_GROUP_OBSERVE"):
         mark_observed(group_id)
         return
 
@@ -305,10 +306,11 @@ async def _observe_group_loop(group_id: int) -> None:
 
 @group_handler.handle()
 async def handle_group(bot: Bot, event: GroupMessageEvent) -> None:
+    cfg = _cfg()
     if event.user_id == event.self_id:
         return
 
-    if not ENABLE_GROUP_CHAT:
+    if not cfg.get_bool("ENABLE_GROUP_CHAT"):
         return
 
     user_message = event.get_plaintext().strip()
@@ -316,7 +318,7 @@ async def handle_group(bot: Bot, event: GroupMessageEvent) -> None:
     group_id = event.group_id
     session_id = group_session(group_id)
 
-    if event.user_id in BOT_ADMINS:
+    if event.user_id in cfg.get_int_list("BOT_ADMINS"):
         parsed = parse_command(user_message)
         if parsed is not None:
             cmd, args = parsed
@@ -385,5 +387,5 @@ async def handle_group(bot: Bot, event: GroupMessageEvent) -> None:
             )
         return
 
-    if ENABLE_GROUP_OBSERVE:
+    if cfg.get_bool("ENABLE_GROUP_OBSERVE"):
         schedule_observe(group_id)

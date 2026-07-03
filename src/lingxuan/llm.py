@@ -2,22 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
-from functools import lru_cache
 
 import nonebot
 from openai import AsyncOpenAI
 
-from lingxuan.config import (
-    BOT_NAME,
-    ENABLE_MEMORY_SUMMARY,
-    ENABLE_USER_MEMORY,
-    GROUP_CHAT_CONTEXT,
-    GROUP_CHAT_MAX_TOKENS,
-    MEMORY_WINDOW,
-    OPENAI_API_KEY,
-    OPENAI_BASE_URL,
-    OPENAI_MODEL,
-)
+from lingxuan._config import _cfg
 from lingxuan.memory import (
     format_entities_for_prompt,
     load_history,
@@ -36,16 +25,25 @@ FALLBACK_REPLY = "抱歉，我现在有点不舒服，稍后再聊吧~"
 FALLBACK_NO_KEY = "我还没配置好呢，让主人先设置一下 API Key 吧~"
 _FALLBACK_TEXTS = frozenset({FALLBACK_REPLY, FALLBACK_NO_KEY, "no"})
 
+# Module-level client cache (replaces @lru_cache to support config changes)
+_cached_client: AsyncOpenAI | None = None
+_cached_client_key: str = ""
+
 
 def _is_fallback_text(text: str) -> bool:
     return text.strip() in _FALLBACK_TEXTS
 
 
-@lru_cache(maxsize=1)
 def _get_client() -> AsyncOpenAI:
-    if not OPENAI_API_KEY:
+    global _cached_client, _cached_client_key
+    api_key = _cfg().get_str("OPENAI_API_KEY")
+    if not api_key:
         raise ValueError("OPENAI_API_KEY 未配置，请在 .env 文件中设置")
-    return AsyncOpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+    if _cached_client is None or api_key != _cached_client_key:
+        base_url = _cfg().get_str("OPENAI_BASE_URL")
+        _cached_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        _cached_client_key = api_key
+    return _cached_client
 
 
 async def _call_llm(
@@ -76,7 +74,7 @@ async def call_llm_raw(
     try:
         client = _get_client()
         response = await client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=_cfg().get_str("OPENAI_MODEL"),
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -121,7 +119,7 @@ def build_context_messages(
                 "content": f"【此前对话摘要】\n{session.summary}",
             }
         )
-    if ENABLE_USER_MEMORY:
+    if _cfg().get_bool("ENABLE_USER_MEMORY"):
         obs = observation_text
         if extra_user and "【当前群聊观察】" in extra_user:
             obs = extra_user
@@ -146,21 +144,24 @@ def build_context_messages(
 
 
 def _group_llm_kwargs() -> dict[str, int]:
+    cfg = _cfg()
     return {
-        "history_limit": GROUP_CHAT_CONTEXT,
-        "max_tokens": GROUP_CHAT_MAX_TOKENS,
+        "history_limit": cfg.get_int("GROUP_CHAT_CONTEXT"),
+        "max_tokens": cfg.get_int("GROUP_CHAT_MAX_TOKENS"),
     }
 
 
 async def summarize_session(session_id: str) -> str:
+    cfg = _cfg()
     session = load_session(session_id)
     if not session.history:
         return ""
+    memory_window = cfg.get_int("MEMORY_WINDOW")
     lines = [
-        f"{m['role']}: {m['content']}" for m in session.history[: MEMORY_WINDOW]
+        f"{m['role']}: {m['content']}" for m in session.history[:memory_window]
     ]
     identity_note = ""
-    if ENABLE_USER_MEMORY:
+    if cfg.get_bool("ENABLE_USER_MEMORY"):
         from lingxuan.user_memory import list_user_profiles, load_user_profile, display_name
 
         id_lines = []
@@ -194,9 +195,10 @@ async def summarize_session(session_id: str) -> str:
 
 
 async def maybe_summarize(session_id: str) -> None:
-    if not ENABLE_MEMORY_SUMMARY:
+    cfg = _cfg()
+    if not cfg.get_bool("ENABLE_MEMORY_SUMMARY"):
         return
-    if len(load_history(session_id)) <= MEMORY_WINDOW:
+    if len(load_history(session_id)) <= cfg.get_int("MEMORY_WINDOW"):
         return
     await summarize_session(session_id)
 
@@ -223,7 +225,9 @@ async def should_reply_in_group(
                 record_judge_result(group_id, "no:local_skip")
             return False
     user_brief = ""
-    if ENABLE_USER_MEMORY and primary_user_id:
+    cfg = _cfg()
+    bot_name = cfg.get_str("BOT_NAME")
+    if cfg.get_bool("ENABLE_USER_MEMORY") and primary_user_id:
         user_brief = format_user_brief(primary_user_id)
     prompt = (
         f"近期群聊：\n{observation}\n\n"
@@ -231,9 +235,9 @@ async def should_reply_in_group(
     if user_brief:
         prompt += f"最后发言者：{user_brief}\n\n"
     prompt += (
-        f"你是{BOT_NAME}，正在群里观察大家聊天。判断你是否需要回应。\n"
+        f"你是{bot_name}，正在群里观察大家聊天。判断你是否需要回应。\n"
         f"回答 yes 的情况：\n"
-        f"- 有人在找{BOT_NAME}说话（叫名字、@你、或继续跟你对话）\n"
+        f"- 有人在找{bot_name}说话（叫名字、@你、或继续跟你对话）\n"
         f"- 有人在群里求助、诉苦、提问，像是在等有人接话，你可以关心一下\n"
         f"回答 no 的情况：\n"
         f"- 明显是别人之间的闲聊，与你无关\n"
@@ -284,9 +288,10 @@ async def observe_and_chat_in_group(
     observation: str,
     group_id: int | None = None,
 ) -> tuple[bool, str]:
+    bot_name = _cfg().get_str("BOT_NAME")
     context_msg = (
         f"近期群聊：\n{observation}\n\n"
-        f"你是{BOT_NAME}，正在群里观察大家聊天。\n"
+        f"你是{bot_name}，正在群里观察大家聊天。\n"
         "需要回复的情况：有人 @你、叫你的名字、让你回答/回复某人、或在跟你说话。\n"
         "不需要回复：纯闲聊、别人之间对话、与你无关的技术讨论。\n"
         "若不需要参与，只输出一行：SKIP\n"
@@ -370,6 +375,7 @@ async def chat_stream(
     primary_user_id: int | None = None,
     observation_text: str = "",
 ) -> AsyncIterator[str]:
+    cfg = _cfg()
     if is_group:
         kwargs = _group_llm_kwargs()
         obs = observation_text or (extra_user or "")
@@ -393,7 +399,7 @@ async def chat_stream(
     try:
         client = _get_client()
         stream = await client.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=cfg.get_str("OPENAI_MODEL"),
             messages=messages,
             temperature=0.7,
             max_tokens=max_tokens,

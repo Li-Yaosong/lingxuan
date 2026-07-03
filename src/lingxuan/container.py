@@ -341,7 +341,11 @@ class Container:
     # ── builders (one per service, called lazily) ─────────────────────────
 
     def _build_config(self) -> EnvConfigProvider:
-        return EnvConfigProvider()
+        from lingxuan._config import set_global_config
+
+        provider = EnvConfigProvider()
+        set_global_config(provider)
+        return provider
 
     def _build_clock(self) -> SystemClock:
         return SystemClock()

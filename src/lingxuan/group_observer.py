@@ -9,14 +9,7 @@ from typing import Any
 
 import nonebot
 
-from lingxuan.config import (
-    BOT_NAME,
-    GROUP_BURST_MERGE_WINDOW,
-    GROUP_FOLLOWUP_WINDOW,
-    GROUP_OBSERVE_COOLDOWN,
-    GROUP_OBSERVE_DELAY,
-    GROUP_OBSERVE_WINDOW,
-)
+from lingxuan._config import _cfg
 
 logger = nonebot.logger
 
@@ -96,8 +89,9 @@ async def group_reply_session(group_id: int) -> AsyncIterator[None]:
 
 def _trim_buffer(group_id: int) -> None:
     buf = _buffers.get(group_id, [])
-    if len(buf) > GROUP_OBSERVE_WINDOW:
-        _buffers[group_id] = buf[-GROUP_OBSERVE_WINDOW:]
+    window = _cfg().get_int("GROUP_OBSERVE_WINDOW")
+    if len(buf) > window:
+        _buffers[group_id] = buf[-window:]
 
 
 def append_entry(group_id: int, entry: ObservationEntry) -> None:
@@ -113,7 +107,7 @@ def append_bot_message(group_id: int, text: str) -> None:
     _buffers.setdefault(group_id, []).append(
         ObservationEntry(
             user_id=0,
-            nickname=BOT_NAME,
+            nickname=_cfg().get_str("BOT_NAME"),
             text=text,
             is_bot=True,
         )
@@ -128,9 +122,10 @@ def _format_entry_line(
     at_bot: bool = False,
     at_other_names: list[str] | None = None,
 ) -> str:
+    bot_name = _cfg().get_str("BOT_NAME")
     markers: list[str] = []
     if at_bot:
-        markers.append(f"@{BOT_NAME}")
+        markers.append(f"@{bot_name}")
     if at_other_names:
         markers.extend(f"@{n}" for n in at_other_names)
     suffix = f" -> {' '.join(markers)}" if markers else ""
@@ -139,12 +134,14 @@ def _format_entry_line(
 
 def format_observation(group_id: int) -> str:
     entries = _buffers.get(group_id, [])
+    bot_name = _cfg().get_str("BOT_NAME")
+    burst_merge_window = _cfg().get_float("GROUP_BURST_MERGE_WINDOW")
     lines: list[str] = []
     i = 0
     while i < len(entries):
         entry = entries[i]
         if entry.is_bot:
-            name = entry.nickname or BOT_NAME
+            name = entry.nickname or bot_name
             lines.append(f"[{name}]: {entry.text}")
             i += 1
             continue
@@ -159,7 +156,7 @@ def format_observation(group_id: int) -> str:
                 break
             if cur.user_id != entry.user_id:
                 break
-            if j > i and cur.ts - entries[j - 1].ts > GROUP_BURST_MERGE_WINDOW:
+            if j > i and cur.ts - entries[j - 1].ts > burst_merge_window:
                 break
             if cur.text.strip():
                 merged_texts.append(cur.text)
@@ -277,6 +274,8 @@ def should_skip_observe(group_id: int) -> bool:
 def is_followup_after_bot(group_id: int) -> bool:
     state = _state(group_id)
     entries = _buffers.get(group_id, [])
+    bot_name = _cfg().get_str("BOT_NAME")
+    followup_window = _cfg().get_float("GROUP_FOLLOWUP_WINDOW")
     last_bot_ts = 0.0
     for entry in reversed(entries):
         if entry.is_bot:
@@ -290,13 +289,13 @@ def is_followup_after_bot(group_id: int) -> bool:
             continue
         if not entry.text.strip():
             continue
-        if entry.ts - last_bot_ts > GROUP_FOLLOWUP_WINDOW:
+        if entry.ts - last_bot_ts > followup_window:
             return False
         if is_knowledge_question(entry.text):
             return False
         if entry.at_user_ids and not entry.at_bot:
             return False
-        if entry.at_bot or entry.reply_to_bot or BOT_NAME in entry.text:
+        if entry.at_bot or entry.reply_to_bot or bot_name in entry.text:
             return True
         if state.last_reply_user_id and entry.user_id == state.last_reply_user_id:
             if len(entry.text) <= 20 and not is_knowledge_question(entry.text):
@@ -306,9 +305,10 @@ def is_followup_after_bot(group_id: int) -> bool:
 
 
 def is_directed_at_bot(text: str) -> bool:
+    bot_name = _cfg().get_str("BOT_NAME")
     if not text.strip():
         return False
-    if BOT_NAME in text:
+    if bot_name in text:
         return True
     hints = ("叫你", "问你", "回她", "回他", "回复一下", "回答", "出来答", "回一下")
     return any(h in text for h in hints) and "你" in text
@@ -352,7 +352,7 @@ def should_bypass_cooldown(group_id: int) -> bool:
     last_text = get_last_user_text(group_id)
     if is_knowledge_question(last_text):
         return True
-    if is_directed_at_bot(last_text) or BOT_NAME in last_text:
+    if is_directed_at_bot(last_text) or _cfg().get_str("BOT_NAME") in last_text:
         return True
     if is_seeking_engagement(last_text):
         return True
@@ -387,7 +387,7 @@ def mark_last_trigger(group_id: int, reply_user_id: int = 0) -> None:
     now = time.time()
     state = _state(group_id)
     state.last_reply_at = now
-    state.cooldown_until = now + GROUP_OBSERVE_COOLDOWN
+    state.cooldown_until = now + _cfg().get_float("GROUP_OBSERVE_COOLDOWN")
     if reply_user_id:
         state.last_reply_user_id = reply_user_id
 
@@ -418,7 +418,7 @@ def register_observe_callback(group_id: int, callback: ObserveCallback) -> None:
 
 async def _run_debounced_observe(group_id: int) -> None:
     try:
-        await asyncio.sleep(GROUP_OBSERVE_DELAY)
+        await asyncio.sleep(_cfg().get_float("GROUP_OBSERVE_DELAY"))
     except asyncio.CancelledError:
         return
     _debounce_tasks.pop(group_id, None)
@@ -454,7 +454,7 @@ def schedule_observe(group_id: int) -> None:
     if task is not None:
         task.cancel()
     _debounce_tasks[group_id] = asyncio.create_task(_run_debounced_observe(group_id))
-    logger.info("observe scheduled group={} delay={}s", group_id, GROUP_OBSERVE_DELAY)
+    logger.info("observe scheduled group={} delay={}s", group_id, _cfg().get_float("GROUP_OBSERVE_DELAY"))
 
 
 async def run_observe_loop(group_id: int, callback: ObserveCallback) -> None:

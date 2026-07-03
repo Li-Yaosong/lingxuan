@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lingxuan.config import BOT_NAME, OPENAI_MODEL, get_runtime_config, is_feature_enabled
+from lingxuan._config import _cfg, mask_api_key
 from lingxuan.group_observer import format_observation, get_observe_state, get_recent_entries
 from lingxuan.memory import clear_history, get_session_meta, get_summary, load_history
 from lingxuan.user_memory import (
@@ -14,7 +14,9 @@ from lingxuan.user_memory import (
     load_user_profile,
 )
 
-COMMAND_PREFIX = f"/{BOT_NAME} "
+
+def _command_prefix() -> str:
+    return f"/{_cfg().get_str('BOT_NAME')} "
 
 
 @dataclass
@@ -27,9 +29,10 @@ class CommandContext:
 
 
 def parse_command(text: str) -> tuple[str, list[str]] | None:
-    if not text.startswith(COMMAND_PREFIX):
+    prefix = _command_prefix()
+    if not text.startswith(prefix):
         return None
-    rest = text[len(COMMAND_PREFIX) :].strip()
+    rest = text[len(prefix) :].strip()
     if not rest:
         return "", []
     parts = rest.split()
@@ -54,7 +57,7 @@ async def run_command(cmd: str, args: list[str], ctx: CommandContext) -> str:
             "observe / 观察(仅群聊)"
         )
     if cmd == "status":
-        return _cmd_status(ctx)
+        return await _cmd_status(ctx)
     if cmd == "reset_memory":
         return _cmd_reset_memory(args, ctx)
     if cmd == "user_memory":
@@ -133,18 +136,19 @@ def _cmd_reset_user_memory(args: list[str], ctx: CommandContext) -> str:
     return f"用户 {uid} 没有档案"
 
 
-def _cmd_status(ctx: CommandContext) -> str:
-    cfg = get_runtime_config()
+async def _cmd_status(ctx: CommandContext) -> str:
+    cfg = _cfg()
+    cfg_all = await cfg.get_all()
     history = load_history(ctx.session_id)
     meta = get_session_meta(ctx.session_id)
     summary = get_summary(ctx.session_id)
     lines = [
-        f"模型: {OPENAI_MODEL}",
-        f"私聊: {'开' if is_feature_enabled('enable_private_chat') else '关'}",
-        f"群聊: {'开' if is_feature_enabled('enable_group_chat') else '关'}",
-        f"观察: {'开' if is_feature_enabled('enable_group_observe') else '关'}",
-        f"用户记忆: {'开' if is_feature_enabled('enable_user_memory') else '关'}",
-        f"认知整合: {'开' if is_feature_enabled('enable_user_cognition_refine') else '关'}",
+        f"模型: {cfg.get_str('OPENAI_MODEL')}",
+        f"私聊: {'开' if cfg.get_bool('ENABLE_PRIVATE_CHAT') else '关'}",
+        f"群聊: {'开' if cfg.get_bool('ENABLE_GROUP_CHAT') else '关'}",
+        f"观察: {'开' if cfg.get_bool('ENABLE_GROUP_OBSERVE') else '关'}",
+        f"用户记忆: {'开' if cfg.get_bool('ENABLE_USER_MEMORY') else '关'}",
+        f"认知整合: {'开' if cfg.get_bool('ENABLE_USER_COGNITION_REFINE') else '关'}",
         f"记忆条数: {len(history)}",
         f"摘要: {'有' if summary else '无'}",
         f"用户档案数: {len(list_user_profiles())}",
@@ -159,7 +163,7 @@ def _cmd_status(ctx: CommandContext) -> str:
         lines.append(f"最近 judge: {obs['last_judge_result'] or '(无)'}")
         if obs["in_cooldown"]:
             lines.append(f"冷却剩余: {obs['cooldown_remaining']:.0f}s")
-    lines.append(f"API Key: {cfg['openai_api_key']}")
+    lines.append(f"API Key: {cfg_all.get('OPENAI_API_KEY', mask_api_key(''))}")
     return "\n".join(lines)
 
 

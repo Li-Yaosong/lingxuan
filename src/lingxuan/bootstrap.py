@@ -11,6 +11,7 @@ from __future__ import annotations
 import nonebot
 from nonebot.adapters.onebot.v11 import Adapter as OneBotV11Adapter
 
+from lingxuan._config import set_global_config
 from lingxuan.container import Container, build_container
 
 
@@ -61,6 +62,9 @@ def main() -> None:
     """Process entry point: build container → init nonebot → register lifecycle → run."""
     # 1. Build Container
     container = build_container()
+
+    # 2. Set global ConfigProvider for legacy MVP modules
+    set_global_config(container.config)
 
     # 2. Initialise NoneBot
     driver_spec = container.config.get_str("DRIVER")
