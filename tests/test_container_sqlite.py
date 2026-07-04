@@ -3,9 +3,14 @@
 Uses a temporary SQLite database (in-memory), runs ``db.create_all()`` to set up
 schema, builds the Container with fake adapters (LLM/transport), sends a private
 message, and asserts that ``session_messages`` has a persisted row.
+
+A file-based variant tests the production ``ensure_schema()`` (alembic upgrade head)
+path, verifying that ``alembic_version`` is stamped correctly.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -146,3 +151,88 @@ async def test_session_repo_has_persisted_rows(sqlite_container: Container) -> N
         )
         count = result.scalar_one()
         assert count >= 1, "session_messages should have at least one row for the session"
+
+
+# ---------------------------------------------------------------------------
+# Production path: ensure_schema() (alembic upgrade head)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_stamps_alembic_version(tmp_path: Path) -> None:
+    """``ensure_schema()`` must create tables via Alembic and stamp alembic_version."""
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+    db = Database(db_url)
+
+    db.ensure_schema()
+
+    # Verify alembic_version table exists and has a row
+    from sqlalchemy import create_engine, text as sync_text
+
+    sync_engine = create_engine(f"sqlite:///{db_file}")
+    try:
+        with sync_engine.connect() as conn:
+            result = conn.execute(sync_text("SELECT version_num FROM alembic_version"))
+            rows = result.fetchall()
+            assert len(rows) >= 1, "alembic_version should have at least one row"
+
+        # Verify all application tables exist
+        from sqlalchemy import inspect
+
+        inspector = inspect(sync_engine)
+        table_names = set(inspector.get_table_names())
+        expected = {
+            "sessions", "session_messages", "session_entities",
+            "user_profiles", "user_facts",
+            "social_edges", "name_index",
+            "settings", "admin_users", "audit_logs", "plugin_configs",
+        }
+        app_tables = table_names - {"alembic_version"}
+        assert app_tables == expected
+    finally:
+        sync_engine.dispose()
+        await db.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ensure_schema_then_container_message(tmp_path: Path) -> None:
+    """End-to-end test using ensure_schema (alembic) instead of create_all."""
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite+aiosqlite:///{db_file}"
+
+    c = Container()
+    c.override("config", EnvConfigProvider(_skip_dotenv=True))
+    c.override("clock", FakeClock)
+    c.override("log", FakeLogSink)
+    c.override("llm", FakeLLMProvider)
+    c.override("transport", FakeTransport)
+    c.override("db", Database(db_url))
+
+    # Production startup path: ensure_schema instead of create_all
+    c.db.ensure_schema()
+    _ = c.config_repo
+
+    try:
+        session_id = SessionId(kind="private", peer_id=77777)
+        inbound = InboundMessage(
+            session_id=session_id,
+            actor=Actor(user_id=77777, nickname="SchemaTest", is_admin=False, is_self=False),
+            text="schema验证",
+            raw_text="schema验证",
+            at_bot=False,
+            reply_to_bot=False,
+            at_user_ids=[],
+            group_id=None,
+        )
+
+        await c.dialogue.handle_inbound(inbound)
+
+        history = await c.session_repo.load_history(session_id)
+        assert len(history) >= 1
+
+        user_msgs = [m for m in history if m.role == "user"]
+        assert len(user_msgs) >= 1
+        assert "schema验证" in user_msgs[0].content
+    finally:
+        await c.db.dispose()

@@ -34,11 +34,13 @@ def _validate_config(container: Container) -> list[str]:
 
 
 async def _startup(container: Container) -> None:
-    """Startup hook: ensure DB, validate config, init user memory, print summary."""
+    """Startup hook: ensure DB schema, validate config, init user memory, print summary."""
     logger = nonebot.logger
 
-    # Ensure DB schema exists (Phase 2: create_all; Phase 3 adds alembic migration)
-    await container.db.create_all()
+    # Ensure DB schema is at the latest Alembic revision.
+    # Uses alembic upgrade head (sync) so that alembic_version is stamped
+    # correctly for future incremental migrations.
+    container.db.ensure_schema()
 
     # Load DB values into ConfigProvider (triggers _ensure_db_loaded on first access)
     _ = container.config_repo

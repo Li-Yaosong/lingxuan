@@ -6,6 +6,7 @@ Provides ``create_engine_and_sessionmaker`` for low-level control and
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -19,6 +20,8 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_db_dir(db_url: str) -> None:
@@ -79,6 +82,7 @@ class Database:
     """
 
     def __init__(self, db_url: str) -> None:
+        self._db_url = db_url
         self._engine, self._sessionmaker = create_engine_and_sessionmaker(db_url)
 
     @property
@@ -112,6 +116,32 @@ class Database:
 
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+    def ensure_schema(self) -> None:
+        """Ensure the DB schema is at the latest Alembic revision.
+
+        Runs ``alembic upgrade head`` programmatically using the synchronous
+        SQLite driver (matching alembic/env.py).  If the DB is empty,
+        this creates all tables *and* writes the ``alembic_version`` stamp so
+        that future incremental migrations can detect the current state.
+
+        Raises on migration failure; the caller should log and decide whether
+        to abort startup.
+        """
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config()
+        cfg.set_main_option("script_location", "alembic")
+
+        # Resolve DB URL: convert async → sync for Alembic
+        sync_url = self._db_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+        cfg.set_main_option("sqlalchemy.url", sync_url)
+
+        _ensure_db_dir(sync_url)
+
+        command.upgrade(cfg, "head")
+        logger.info("Schema ensured via alembic upgrade head (url=%s)", sync_url)
 
     async def dispose(self) -> None:
         """Dispose the async engine and release all connections."""

@@ -1,4 +1,4 @@
-"""Tests for EnvConfigProvider: defaults, env override, set+subscribe, masking."""
+"""Tests for EnvConfigProvider: defaults, env override, set+subscribe, masking, attach_db."""
 
 from __future__ import annotations
 
@@ -203,3 +203,67 @@ class TestMasking:
         provider = _make_provider(OPENAI_API_KEY="abc")
         all_vals = await provider.get_all(mask_secrets=True)
         assert all_vals["OPENAI_API_KEY"] == "****"
+
+
+# ---------------------------------------------------------------------------
+# 5. attach_db: wiring DB repo + audit repo after construction
+# ---------------------------------------------------------------------------
+
+class TestAttachDb:
+    @pytest.mark.asyncio
+    async def test_attach_db_wires_repos(self) -> None:
+        """attach_db() should wire db_repo and audit_repo for set() persistence."""
+        from lingxuan.adapters.storage.db import Database
+        from lingxuan.adapters.storage.repositories import SqlAuditRepository, SqlConfigRepository
+
+        db = Database("sqlite+aiosqlite://")
+        await db.create_all()
+        try:
+            config_repo = SqlConfigRepository(db)
+            audit_repo = SqlAuditRepository(db)
+
+            provider = _make_provider()
+            assert provider._db_repo is None
+            assert provider._audit_repo is None
+
+            provider.attach_db(config_repo, audit_repo)
+
+            assert provider._db_repo is config_repo
+            assert provider._audit_repo is audit_repo
+            assert provider._db_loaded is False
+
+            # set() should now persist to DB and record audit
+            await provider.set("BOT_NAME", "DB测试", actor="test_actor")
+
+            # Verify persisted to DB
+            all_db = await config_repo.get_all()
+            assert all_db["BOT_NAME"] == "DB测试"
+
+            # Verify audit recorded
+            entries = await audit_repo.query(action="config_set", limit=5)
+            assert any(e.target == "BOT_NAME" and e.actor == "test_actor" for e in entries)
+        finally:
+            await db.dispose()
+
+    @pytest.mark.asyncio
+    async def test_attach_db_without_audit(self) -> None:
+        """attach_db() with no audit_repo should still wire db_repo."""
+        from lingxuan.adapters.storage.db import Database
+        from lingxuan.adapters.storage.repositories import SqlConfigRepository
+
+        db = Database("sqlite+aiosqlite://")
+        await db.create_all()
+        try:
+            config_repo = SqlConfigRepository(db)
+            provider = _make_provider()
+            provider.attach_db(config_repo)  # no audit_repo
+
+            assert provider._db_repo is config_repo
+            assert provider._db_loaded is False
+
+            # set() should persist to DB without audit
+            await provider.set("BOT_NAME", "无审计")
+            all_db = await config_repo.get_all()
+            assert all_db["BOT_NAME"] == "无审计"
+        finally:
+            await db.dispose()

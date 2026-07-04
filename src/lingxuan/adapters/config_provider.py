@@ -107,6 +107,18 @@ class EnvConfigProvider:
                 return [int(x.strip()) for x in value.split(",") if x.strip().isdigit()]
         return value
 
+    def attach_db(self, db_repo: ConfigRepository, audit_repo: AuditRepository | None = None) -> None:
+        """Wire DB repo (and optional audit repo) after construction.
+
+        Called by Container once both the config provider and the DB repos
+        exist — breaks the config→db→config circular dependency by deferring
+        the attachment until all pieces are built.
+        """
+        self._db_repo = db_repo
+        self._db_loaded = False
+        if audit_repo is not None:
+            self._audit_repo = audit_repo
+
     # ── ConfigProvider interface ──────────────────────────────────────────
 
     def get(self, key: str) -> object:

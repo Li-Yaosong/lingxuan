@@ -289,12 +289,11 @@ class Container:
         """Wire the ConfigRepository and AuditRepository into the already-built EnvConfigProvider."""
         cfg = self._cache.get("config")
         if isinstance(cfg, EnvConfigProvider):
-            cfg._db_repo = repo
-            cfg._db_loaded = False
-            # Also attach audit repo for set() auditing
             audit = self._cache.get("audit_repo")
-            if isinstance(audit, SqlAuditRepository):
-                cfg._audit_repo = audit
+            cfg.attach_db(
+                db_repo=repo,
+                audit_repo=audit if isinstance(audit, SqlAuditRepository) else None,
+            )
 
     def _build_llm(self) -> OpenAIProvider:
         return OpenAIProvider(self.config, self.log)
