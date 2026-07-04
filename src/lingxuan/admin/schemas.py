@@ -75,3 +75,25 @@ class LLMCheckResponse(BaseModel):
     ok: bool
     latency_ms: float = 0.0
     error: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Log schemas
+# ---------------------------------------------------------------------------
+
+
+class LogRecordResponse(BaseModel):
+    """One structured log record returned by GET /logs or WS log push."""
+
+    ts: str
+    level: str
+    logger: str
+    msg: str
+    extra: dict = Field(default_factory=dict)
+
+
+class LogsResponse(BaseModel):
+    """Response for GET /logs."""
+
+    records: list[LogRecordResponse]
+    total: int
