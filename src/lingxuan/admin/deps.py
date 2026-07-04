@@ -2,16 +2,18 @@
 
 Provides ``get_container()`` and per-service/repository convenience
 dependencies so route handlers can declare what they need via
-``Depends()``.  Auth-related dependencies (current user) will be
-filled in P4-03.
+``Depends()``.  Auth-related dependencies (current user, role guards)
+are implemented here.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from lingxuan.admin.auth import InvalidTokenError, decode_token
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.logging import LogSink
 from lingxuan.protocols.repositories import (
@@ -94,3 +96,104 @@ ConfigRepoDep = Annotated[ConfigRepository, Depends(_get_config_repo)]
 AuditRepoDep = Annotated[AuditRepository, Depends(_get_audit_repo)]
 PluginConfigRepoDep = Annotated[PluginConfigRepository, Depends(_get_plugin_config_repo)]
 AdminUserRepoDep = Annotated[AdminUserRepository, Depends(_get_admin_user_repo)]
+
+
+# ── auth dependencies ────────────────────────────────────────────────────
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+async def _get_current_user(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)],
+    config: ConfigDep,
+    repo: AdminUserRepoDep,
+) -> dict[str, Any]:
+    """Decode the Bearer access token and return user info dict.
+
+    Returns ``{"username", "role", "must_change_password"}``.
+    Raises 401 if no token / invalid / expired.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        payload = decode_token(config, credentials.credentials)
+    except InvalidTokenError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    if payload.get("type") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not an access token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    username: str = payload.get("sub", "")
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing subject",
+        )
+
+    # Look up current user state from DB (role/must_change_password may have changed)
+    row = await repo.get_by_username(username)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User no longer exists",
+        )
+
+    return {
+        "username": row.username,
+        "role": row.role,
+        "must_change_password": row.must_change_password,
+    }
+
+
+async def _require_user(
+    user: Annotated[dict[str, Any], Depends(_get_current_user)],
+) -> dict[str, Any]:
+    """Return current user; if must_change_password, block with 428
+    unless the request is for change-password / me / logout (those routes
+    must bypass this guard by using _get_current_user directly).
+    """
+    if user.get("must_change_password"):
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="Password change required before accessing this resource",
+        )
+    return user
+
+
+async def _require_admin(
+    user: Annotated[dict[str, Any], Depends(_require_user)],
+) -> dict[str, Any]:
+    """Require role == 'admin'; 403 otherwise."""
+    if user["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return user
+
+
+async def _require_readonly_ok(
+    user: Annotated[dict[str, Any], Depends(_require_user)],
+) -> dict[str, Any]:
+    """Any authenticated user (admin or readonly) is allowed."""
+    return user
+
+
+# Annotated aliases for auth guards
+CurrentUser = Annotated[dict[str, Any], Depends(_get_current_user)]
+RequireUser = Annotated[dict[str, Any], Depends(_require_user)]
+RequireAdmin = Annotated[dict[str, Any], Depends(_require_admin)]
+RequireReadonlyOk = Annotated[dict[str, Any], Depends(_require_readonly_ok)]

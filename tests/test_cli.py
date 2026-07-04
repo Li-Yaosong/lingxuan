@@ -181,31 +181,23 @@ class TestDbRevision:
 
 
 # ---------------------------------------------------------------------------
-# Placeholder subcommands
+# admin-passwd subcommand
 # ---------------------------------------------------------------------------
 
 
-class TestPlaceholders:
-    @pytest.mark.parametrize(
-        "subcommand",
-        ["admin-passwd"],
-    )
-    def test_placeholder_exits_nonzero(self, subcommand: str) -> None:
-        """Placeholder subcommands exit with code 1."""
+class TestAdminPasswd:
+    def test_requires_username(self) -> None:
+        """admin-passwd without --username exits with usage error."""
         with pytest.raises(SystemExit) as exc_info:
-            main([subcommand])
-        assert exc_info.value.code == 1
+            main(["admin-passwd"])
+        assert exc_info.value.code != 0
 
-    @pytest.mark.parametrize(
-        "subcommand",
-        ["admin-passwd"],
-    )
-    def test_placeholder_prints_not_implemented(self, subcommand: str, capsys: pytest.CaptureFixture[str]) -> None:
-        """Placeholder subcommands print a not-implemented message to stderr."""
-        with pytest.raises(SystemExit):
-            main([subcommand])
-        captured = capsys.readouterr()
-        assert "尚未实现" in captured.err
+    def test_accepts_role_flag(self) -> None:
+        """admin-passwd --username X --role readonly is accepted by argparser."""
+        # It will still fail at password prompt, but arg parsing should succeed
+        with patch("lingxuan.cli._cmd_admin_passwd") as mock_cmd:
+            main(["admin-passwd", "--username", "testadmin", "--role", "readonly"])
+            mock_cmd.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

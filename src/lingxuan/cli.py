@@ -7,7 +7,7 @@ Subcommands:
   migrate-memory   Migrate JSON memory to SQLite
   backup           (placeholder) Backup data
   restore          (placeholder) Restore data
-  admin-passwd     (placeholder) Reset admin password
+  admin-passwd     Create or reset an admin password
 
 Global options:
   --data-root      Override DATA_ROOT config
@@ -115,8 +115,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Do not restore memory.zip",
     )
 
-    # ── placeholder subcommands ──────────────────────────────────────────
-    sub.add_parser("admin-passwd", help="Reset admin password (not yet implemented)")
+    # ── admin-passwd ──────────────────────────────────────────────────────
+    ap_parser = sub.add_parser("admin-passwd", help="Create or reset an admin password")
+    ap_parser.add_argument(
+        "--username",
+        required=True,
+        help="Admin username to create or reset",
+    )
+    ap_parser.add_argument(
+        "--role",
+        default="admin",
+        choices=["admin", "readonly"],
+        help="Role for new user (default: admin; ignored if user exists)",
+    )
 
     return parser
 
@@ -376,6 +387,61 @@ def _cmd_migrate_memory(args: argparse.Namespace) -> None:
     asyncio.run(_run())
 
 
+def _cmd_admin_passwd(args: argparse.Namespace) -> None:
+    """Create or reset an admin user's password interactively."""
+    import asyncio
+    import getpass
+
+    from lingxuan.admin.auth import hash_password
+    from lingxuan.adapters.storage.db import Database
+    from lingxuan.adapters.storage.repositories import SqlAdminUserRepository
+
+    db_url, _data_root = _resolve_config_paths(args)
+    os.environ["DB_URL"] = db_url
+
+    username = args.username
+    role = args.role
+
+    # Read password interactively
+    password = getpass.getpass(f"Enter password for {username}: ")
+    if not password:
+        print("✗ Password cannot be empty", file=sys.stderr)
+        sys.exit(1)
+    password_confirm = getpass.getpass("Confirm password: ")
+    if password != password_confirm:
+        print("✗ Passwords do not match", file=sys.stderr)
+        sys.exit(1)
+    if len(password) < 6:
+        print("✗ Password must be at least 6 characters", file=sys.stderr)
+        sys.exit(1)
+
+    async def _run() -> None:
+        db = Database(db_url)
+        db.ensure_schema()
+        repo = SqlAdminUserRepository(db)
+
+        existing = await repo.get_by_username(username)
+        pw_hash = hash_password(password)
+
+        if existing is not None:
+            # Reset password — clear must_change_password
+            await repo.set_password(username, pw_hash, must_change_password=False)
+            print(f"✓ Password reset for admin user: {username}")
+        else:
+            # Create new admin user
+            await repo.create(
+                username=username,
+                password_hash=pw_hash,
+                role=role,
+                must_change_password=False,
+            )
+            print(f"✓ Admin user created: {username} (role={role})")
+
+        await db.dispose()
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # Public API (for testing without sys.argv mutation)
 # ---------------------------------------------------------------------------
@@ -414,7 +480,7 @@ def dispatch(args: argparse.Namespace) -> None:
     elif command == "restore":
         _cmd_restore(args)
     elif command == "admin-passwd":
-        _cmd_not_implemented("admin-passwd")
+        _cmd_admin_passwd(args)
     else:
         print(f"未知子命令: {command}", file=sys.stderr)
         sys.exit(1)

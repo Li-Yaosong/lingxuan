@@ -54,15 +54,22 @@ def create_admin_app(container: Container) -> FastAPI:
     async def health() -> JSONResponse:
         return JSONResponse({"status": "ok"})
 
+    # ── SECRET_KEY startup guard ─────────────────────────────────────────
+    # If SECRET_KEY is empty, auth endpoints will fail at request time.
+    # We log a warning at startup so the operator knows immediately.
+    secret_key = container.config.get_str("SECRET_KEY")
+    if not secret_key:
+        import logging
+
+        logging.getLogger("lingxuan.admin").warning(
+            "SECRET_KEY is not configured — admin auth endpoints will reject "
+            "all requests. Set SECRET_KEY in .env or environment."
+        )
+
     # ── Route aggregation ────────────────────────────────────────────────
-    # Routers for config / status / logs (and future data/plugins/audit)
-    # are included here as they are built in subsequent tasks.
-    #
-    # Example (P4-03+):
-    #   from lingxuan.admin.routes import config, status, logs
-    #   app.include_router(config.router, prefix="/admin/api")
-    #   app.include_router(status.router, prefix="/admin/api")
-    #   app.include_router(logs.router,  prefix="/admin/api")
+    from lingxuan.admin.routes import auth as auth_routes
+
+    app.include_router(auth_routes.router, prefix="/admin/api")
 
     # ── SPA static files ─────────────────────────────────────────────────
     _mount_spa(app, container)
