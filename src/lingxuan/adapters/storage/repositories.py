@@ -1,8 +1,9 @@
 """SQLite-backed repository implementations using SQLAlchemy 2.0 async ORM.
 
-This module provides ``SqlSessionRepository`` (P2-04). Additional repositories
-(UserProfile, SocialGraph, Config, Audit, PluginConfig, AdminUser) will be
-added by P2-05/06/07.
+This module provides ``SqlSessionRepository`` (P2-04) and
+``SqlSocialGraphRepository`` (P2-06). Additional repositories
+(UserProfile, Config, Audit, PluginConfig, AdminUser) will be
+added by P2-05/07.
 """
 
 from __future__ import annotations
@@ -14,12 +15,14 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from lingxuan.adapters.storage.db import Database
 from lingxuan.adapters.storage.orm import (
+    NameIndex as NameIndexRow,
     Session as SessionRow,
     SessionEntity as SessionEntityRow,
     SessionMessage as SessionMessageRow,
+    SocialEdge as SocialEdgeRow,
 )
 from lingxuan.protocols.messaging import SessionId
-from lingxuan.protocols.repositories import Session, StoredMessage
+from lingxuan.protocols.repositories import Session, SocialEdge, StoredMessage
 
 
 def _now_iso() -> str:
@@ -332,3 +335,134 @@ class SqlSessionRepository:
             result = await s.execute(stmt)
             rows = result.scalars().all()
             return [_row_to_session(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Helper: ORM row → Protocol DTO
+# ---------------------------------------------------------------------------
+
+
+def _row_to_social_edge(row: SocialEdgeRow) -> SocialEdge:
+    """Convert an ORM ``SocialEdgeRow`` to a Protocol ``SocialEdge`` DTO."""
+    learned_at: datetime
+    if isinstance(row.learned_at, str) and row.learned_at:
+        learned_at = datetime.fromisoformat(row.learned_at)
+    else:
+        learned_at = datetime.now(timezone.utc)
+
+    return SocialEdge(
+        from_user_id=row.from_user_id,
+        to_user_id=row.to_user_id,
+        relation=row.relation,
+        label=row.label,
+        evidence=row.evidence,
+        group_id=row.group_id,
+        learned_at=learned_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# SqlSocialGraphRepository  (P2-06)
+# ---------------------------------------------------------------------------
+
+
+class SqlSocialGraphRepository:
+    """SQLite-backed implementation of ``SocialGraphRepository`` Protocol.
+
+    Uses ``INSERT … ON CONFLICT DO NOTHING`` on the
+    ``(from_user_id, to_user_id, relation, label)`` unique constraint
+    to implement four-tuple dedup, matching the MVP ``social_graph.json``
+    semantics exactly.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    # ------------------------------------------------------------------
+    # add_edge
+    # ------------------------------------------------------------------
+
+    async def add_edge(self, edge: SocialEdge) -> bool:
+        learned_at = edge.learned_at
+        if not learned_at or learned_at.year == 1:
+            learned_at = datetime.now(timezone.utc)
+
+        async with self._db.session() as s:
+            stmt = sqlite_insert(SocialEdgeRow).values(
+                from_user_id=edge.from_user_id,
+                to_user_id=edge.to_user_id,
+                relation=edge.relation,
+                label=edge.label,
+                evidence=edge.evidence,
+                group_id=edge.group_id,
+                learned_at=learned_at.isoformat(),
+            )
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=["from_user_id", "to_user_id", "relation", "label"],
+            )
+            result = await s.execute(stmt)
+            # rowcount == 1 → new row inserted; 0 → conflict, duplicate
+            return result.rowcount == 1  # type: ignore[no-any-return]
+
+    # ------------------------------------------------------------------
+    # index_name
+    # ------------------------------------------------------------------
+
+    async def index_name(self, name: str, user_id: int) -> None:
+        async with self._db.session() as s:
+            stmt = sqlite_insert(NameIndexRow).values(
+                name=name,
+                user_id=user_id,
+                updated_at=_now_iso(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["name"],
+                set_={"user_id": user_id, "updated_at": _now_iso()},
+            )
+            await s.execute(stmt)
+
+    # ------------------------------------------------------------------
+    # resolve_name
+    # ------------------------------------------------------------------
+
+    async def resolve_name(self, name: str) -> int | None:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(NameIndexRow.user_id).where(NameIndexRow.name == name)
+            )
+            val = result.scalar_one_or_none()
+            return val  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # edges_from
+    # ------------------------------------------------------------------
+
+    async def edges_from(self, user_id: int) -> list[SocialEdge]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SocialEdgeRow)
+                .where(SocialEdgeRow.from_user_id == user_id)
+                .order_by(SocialEdgeRow.id)
+            )
+            rows = result.scalars().all()
+            return [_row_to_social_edge(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # all_names
+    # ------------------------------------------------------------------
+
+    async def all_names(self) -> dict[str, int]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(NameIndexRow.name, NameIndexRow.user_id)
+            )
+            return {name: uid for name, uid in result.all()}
+
+    # ------------------------------------------------------------------
+    # clear
+    # ------------------------------------------------------------------
+
+    async def clear(self) -> None:
+        async with self._db.session() as s:
+            await s.execute(delete(SocialEdgeRow))
+            await s.execute(delete(NameIndexRow))
