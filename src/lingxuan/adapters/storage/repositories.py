@@ -1,17 +1,19 @@
 """SQLite-backed repository implementations using SQLAlchemy 2.0 async ORM.
 
-This module provides ``SqlSessionRepository`` (P2-04) and
-``SqlSocialGraphRepository`` (P2-06). Additional repositories
-(UserProfile, Config, Audit, PluginConfig, AdminUser) will be
-added by P2-05/07.
+This module provides ``SqlSessionRepository`` (P2-04),
+``SqlUserProfileRepository`` (P2-05), and ``SqlSocialGraphRepository`` (P2-06).
+Additional repositories (Config, Audit, PluginConfig, AdminUser) will be
+added by P2-07.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete as sa_delete, func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.orm import selectinload
 
 from lingxuan.adapters.storage.db import Database
 from lingxuan.adapters.storage.orm import (
@@ -20,9 +22,11 @@ from lingxuan.adapters.storage.orm import (
     SessionEntity as SessionEntityRow,
     SessionMessage as SessionMessageRow,
     SocialEdge as SocialEdgeRow,
+    UserFact as UserFactRow,
+    UserProfile as UserProfileRow,
 )
 from lingxuan.protocols.messaging import SessionId
-from lingxuan.protocols.repositories import Session, SocialEdge, StoredMessage
+from lingxuan.protocols.repositories import Session, SocialEdge, StoredMessage, UserFact, UserProfile
 
 
 def _now_iso() -> str:
@@ -220,7 +224,7 @@ class SqlSessionRepository:
                 .limit(keep_last)
             )
             result = await s.execute(
-                delete(SessionMessageRow)
+                sa_delete(SessionMessageRow)
                 .where(SessionMessageRow.session_id == key)
                 .where(SessionMessageRow.id.not_in(subq))
             )
@@ -257,7 +261,7 @@ class SqlSessionRepository:
         key = sid.as_str()
         async with self._db.session() as s:
             await s.execute(
-                delete(SessionRow).where(SessionRow.session_id == key)
+                sa_delete(SessionRow).where(SessionRow.session_id == key)
             )
 
     # ------------------------------------------------------------------
@@ -338,7 +342,7 @@ class SqlSessionRepository:
 
 
 # ---------------------------------------------------------------------------
-# Helper: ORM row → Protocol DTO
+# Helper: ORM row → Protocol DTO (SocialGraph)
 # ---------------------------------------------------------------------------
 
 
@@ -464,5 +468,289 @@ class SqlSocialGraphRepository:
 
     async def clear(self) -> None:
         async with self._db.session() as s:
-            await s.execute(delete(SocialEdgeRow))
-            await s.execute(delete(NameIndexRow))
+            await s.execute(sa_delete(SocialEdgeRow))
+            await s.execute(sa_delete(NameIndexRow))
+
+
+# ===========================================================================
+# UserProfileRepository — helpers
+# ===========================================================================
+
+
+def _parse_iso(val: str | None) -> datetime | None:
+    """Parse an ISO-8601 string into a datetime, or return None."""
+    if not val:
+        return None
+    return datetime.fromisoformat(val)
+
+
+def _row_to_user_fact(row: UserFactRow) -> UserFact:
+    """Convert an ORM ``UserFactRow`` to a Protocol ``UserFact`` DTO."""
+    return UserFact(
+        id=row.id,
+        content=row.content,
+        category=row.category,
+        source_user_id=row.source_user_id,
+        learned_at=_parse_iso(row.learned_at) or datetime.now(timezone.utc),
+        confidence=row.confidence,
+        active=row.active,
+        supersedes=row.supersedes,
+    )
+
+
+def _row_to_user_profile(row: UserProfileRow) -> UserProfile:
+    """Convert an ORM ``UserProfileRow`` to a Protocol ``UserProfile`` DTO.
+
+    Deserialises ``aliases_json`` and ``group_cards_json`` and eagerly
+    loaded ``facts`` relationship.
+    """
+    return UserProfile(
+        user_id=row.user_id,
+        preferred_name=row.preferred_name,
+        aliases=json.loads(row.aliases_json) if row.aliases_json else [],
+        group_cards=json.loads(row.group_cards_json) if row.group_cards_json else {},
+        stage=row.stage,
+        first_met_at=_parse_iso(row.first_met_at),
+        last_seen_at=_parse_iso(row.last_seen_at),
+        interaction_count=row.interaction_count,
+        last_group_id=row.last_group_id,
+        seen_in_private=row.seen_in_private,
+        seen_in_group=row.seen_in_group,
+        impression=row.impression,
+        cognition_summary=row.cognition_summary,
+        cognition_updated_at=_parse_iso(row.cognition_updated_at),
+        cognition_interaction_at_update=row.cognition_interaction_at_update,
+        facts=[_row_to_user_fact(f) for f in row.facts],
+    )
+
+
+def _profile_to_values(profile: UserProfile) -> dict[str, object]:
+    """Build a values dict from a ``UserProfile`` DTO for INSERT/UPDATE."""
+    values: dict[str, object] = {
+        "user_id": profile.user_id,
+        "preferred_name": profile.preferred_name,
+        "aliases_json": json.dumps(profile.aliases, ensure_ascii=False),
+        "group_cards_json": json.dumps(profile.group_cards, ensure_ascii=False),
+        "stage": profile.stage,
+        "interaction_count": profile.interaction_count,
+        "last_group_id": profile.last_group_id,
+        "seen_in_private": profile.seen_in_private,
+        "seen_in_group": profile.seen_in_group,
+        "impression": profile.impression,
+        "cognition_summary": profile.cognition_summary,
+        "cognition_interaction_at_update": profile.cognition_interaction_at_update,
+    }
+    # Nullable datetime fields — store as ISO string or None
+    if profile.first_met_at is not None:
+        values["first_met_at"] = profile.first_met_at.isoformat()
+    else:
+        values["first_met_at"] = None
+    if profile.last_seen_at is not None:
+        values["last_seen_at"] = profile.last_seen_at.isoformat()
+    else:
+        values["last_seen_at"] = None
+    if profile.cognition_updated_at is not None:
+        values["cognition_updated_at"] = profile.cognition_updated_at.isoformat()
+    else:
+        values["cognition_updated_at"] = None
+    return values
+
+
+class SqlUserProfileRepository:
+    """SQLite-backed implementation of ``UserProfileRepository`` Protocol.
+
+    Injected with a ``Database`` instance; each method opens its own
+    ``db.session()`` context so that operations are transactional.
+    """
+
+    def __init__(self, db: Database, *, max_active_facts: int = 30) -> None:
+        self._db = db
+        self._max_active_facts = max_active_facts
+
+    # ------------------------------------------------------------------
+    # get
+    # ------------------------------------------------------------------
+
+    async def get(self, user_id: int) -> UserProfile | None:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserProfileRow)
+                .where(UserProfileRow.user_id == user_id)
+                .options(selectinload(UserProfileRow.facts))
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return _row_to_user_profile(row)
+
+    # ------------------------------------------------------------------
+    # upsert
+    # ------------------------------------------------------------------
+
+    async def upsert(self, profile: UserProfile) -> None:
+        values = _profile_to_values(profile)
+        async with self._db.session() as s:
+            stmt = sqlite_insert(UserProfileRow).values(**values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["user_id"],
+                set_={k: stmt.excluded[k] for k in values if k != "user_id"},
+            )
+            await s.execute(stmt)
+
+    # ------------------------------------------------------------------
+    # add_fact
+    # ------------------------------------------------------------------
+
+    async def add_fact(self, user_id: int, fact: UserFact) -> None:
+        # Ensure profile exists (auto-create like InMemory)
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserProfileRow).where(UserProfileRow.user_id == user_id)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = UserProfileRow(user_id=user_id)
+                s.add(row)
+                await s.flush()
+
+        # Skip if an active fact with same content already exists
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserFactRow).where(
+                    UserFactRow.user_id == user_id,
+                    UserFactRow.active.is_(True),
+                    UserFactRow.content == fact.content,
+                )
+            )
+            if result.scalar_one_or_none() is not None:
+                return
+
+        # Insert the fact (idempotent: if id exists, update)
+        learned_at = fact.learned_at
+        if not learned_at or learned_at.year == 1:
+            learned_at = datetime.now(timezone.utc)
+
+        async with self._db.session() as s:
+            stmt = sqlite_insert(UserFactRow).values(
+                id=fact.id,
+                user_id=user_id,
+                content=fact.content,
+                category=fact.category,
+                source_user_id=fact.source_user_id,
+                learned_at=learned_at.isoformat(),
+                confidence=fact.confidence,
+                active=fact.active,
+                supersedes=fact.supersedes,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["id"],
+                set_={
+                    "content": stmt.excluded.content,
+                    "category": stmt.excluded.category,
+                    "source_user_id": stmt.excluded.source_user_id,
+                    "learned_at": stmt.excluded.learned_at,
+                    "confidence": stmt.excluded.confidence,
+                    "active": stmt.excluded.active,
+                    "supersedes": stmt.excluded.supersedes,
+                },
+            )
+            await s.execute(stmt)
+
+        # Soft-delete overflow: deactivate oldest active facts exceeding limit
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(UserFactRow).where(
+                    UserFactRow.user_id == user_id,
+                    UserFactRow.active.is_(True),
+                )
+            )
+            active_count = result.scalar_one()
+            if active_count > self._max_active_facts:
+                excess = active_count - self._max_active_facts
+                # Find the oldest active fact IDs by learned_at
+                result = await s.execute(
+                    select(UserFactRow.id).where(
+                        UserFactRow.user_id == user_id,
+                        UserFactRow.active.is_(True),
+                    ).order_by(UserFactRow.learned_at.asc()).limit(excess)
+                )
+                oldest_ids = [row_id for (row_id,) in result.all()]
+                if oldest_ids:
+                    await s.execute(
+                        update(UserFactRow)
+                        .where(UserFactRow.id.in_(oldest_ids))
+                        .values(active=False)
+                    )
+
+    # ------------------------------------------------------------------
+    # list_active_facts
+    # ------------------------------------------------------------------
+
+    async def list_active_facts(
+        self, user_id: int, *, limit: int | None = None
+    ) -> list[UserFact]:
+        async with self._db.session() as s:
+            stmt = (
+                select(UserFactRow)
+                .where(UserFactRow.user_id == user_id, UserFactRow.active.is_(True))
+                .order_by(UserFactRow.learned_at.desc())
+            )
+            if limit is not None:
+                stmt = stmt.limit(limit)
+            result = await s.execute(stmt)
+            rows = result.scalars().all()
+            # Reverse to ascending learned_at order (oldest first) to match
+            # InMemory which returns facts in append order.
+            return [_row_to_user_fact(r) for r in reversed(rows)]
+
+    # ------------------------------------------------------------------
+    # deactivate_facts
+    # ------------------------------------------------------------------
+
+    async def deactivate_facts(self, user_id: int, fact_ids: list[str]) -> None:
+        if not fact_ids:
+            return
+        async with self._db.session() as s:
+            await s.execute(
+                update(UserFactRow)
+                .where(
+                    UserFactRow.user_id == user_id,
+                    UserFactRow.id.in_(fact_ids),
+                )
+                .values(active=False)
+            )
+
+    # ------------------------------------------------------------------
+    # list_user_ids
+    # ------------------------------------------------------------------
+
+    async def list_user_ids(self) -> list[int]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserProfileRow.user_id)
+            )
+            return [uid for (uid,) in result.all()]
+
+    # ------------------------------------------------------------------
+    # delete
+    # ------------------------------------------------------------------
+
+    async def delete(self, user_id: int) -> bool:
+        async with self._db.session() as s:
+            result = await s.execute(
+                sa_delete(UserProfileRow).where(
+                    UserProfileRow.user_id == user_id
+                )
+            )
+            return result.rowcount > 0  # type: ignore[return-value]
+
+    # ------------------------------------------------------------------
+    # delete_all
+    # ------------------------------------------------------------------
+
+    async def delete_all(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                sa_delete(UserProfileRow)
+            )
+            return result.rowcount  # type: ignore[return-value]
