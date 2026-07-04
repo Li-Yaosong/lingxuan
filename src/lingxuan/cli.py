@@ -86,9 +86,36 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Rename source dir to {source}.imported/ after successful migration",
     )
 
+    # ── backup ────────────────────────────────────────────────────────────
+    backup_parser = sub.add_parser("backup", help="Backup data")
+    backup_parser.add_argument(
+        "--out",
+        default=None,
+        help="Output directory for backups (default: {DATA_ROOT}/backups)",
+    )
+
+    # ── restore ──────────────────────────────────────────────────────────
+    restore_parser = sub.add_parser("restore", help="Restore data from backup")
+    restore_parser.add_argument(
+        "--from",
+        dest="from_dir",
+        required=True,
+        help="Backup directory to restore from",
+    )
+    restore_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Skip confirmation prompt",
+    )
+    restore_parser.add_argument(
+        "--no-memory",
+        action="store_true",
+        default=False,
+        help="Do not restore memory.zip",
+    )
+
     # ── placeholder subcommands ──────────────────────────────────────────
-    sub.add_parser("backup", help="Backup data (not yet implemented)")
-    sub.add_parser("restore", help="Restore data (not yet implemented)")
     sub.add_parser("admin-passwd", help="Reset admin password (not yet implemented)")
 
     return parser
@@ -169,6 +196,76 @@ def _cmd_not_implemented(name: str) -> None:
     """Print a not-yet-implemented message and exit with code 1."""
     print(f"子命令 '{name}' 尚未实现，将在后续任务中完成。", file=sys.stderr)
     sys.exit(1)
+
+
+def _resolve_config_paths(args: argparse.Namespace) -> tuple[str, str]:
+    """Return (db_url, data_root) from CLI overrides / env / defaults."""
+    from lingxuan.settings_defaults import SETTINGS_BY_KEY
+
+    db_url = args.db_url or os.environ.get(
+        "DB_URL", str(SETTINGS_BY_KEY["DB_URL"].default)
+    )
+    data_root = args.data_root or os.environ.get(
+        "DATA_ROOT", str(SETTINGS_BY_KEY["DATA_ROOT"].default)
+    )
+    return db_url, data_root
+
+
+def _cmd_backup(args: argparse.Namespace) -> None:
+    """Create a backup snapshot of the database and optional source JSON."""
+    from pathlib import Path
+
+    from lingxuan.migration.backup import create_backup
+
+    db_url, data_root = _resolve_config_paths(args)
+    out_dir = Path(args.out) if args.out else None
+    manifest = create_backup(db_url, Path(data_root), out_dir)
+
+    actual_out = out_dir or (Path(data_root) / "backups")
+    dirs = sorted(actual_out.iterdir()) if actual_out.exists() else []
+    backup_path = dirs[-1] if dirs else actual_out / "unknown"
+    print(f"✓ 备份完成: {backup_path}")
+    print(f"  数据库大小: {manifest['db_size']} bytes")
+    print(f"  包含 memory.zip: {'是' if manifest.get('includes_memory_zip') else '否'}")
+
+
+def _cmd_restore(args: argparse.Namespace) -> None:
+    """Restore the database from a backup snapshot."""
+    from pathlib import Path
+
+    from lingxuan.migration.backup import restore_backup
+
+    db_url, data_root = _resolve_config_paths(args)
+    backup_dir = Path(args.from_dir)
+
+    if not backup_dir.is_dir():
+        print(f"✗ 备份目录不存在: {backup_dir}", file=sys.stderr)
+        sys.exit(1)
+
+    # Confirmation prompt (unless --yes)
+    if not args.yes:
+        print(f"⚠ 即将从备份恢复数据库: {backup_dir}")
+        print("  此操作将覆盖当前数据库！恢复前会自动创建当前状态的快照。")
+        answer = input("确认恢复？(y/N): ").strip().lower()
+        if answer != "y":
+            print("已取消。")
+            return
+
+    try:
+        manifest = restore_backup(
+            backup_dir,
+            db_url,
+            Path(data_root),
+            auto_snapshot=True,
+            restore_memory=not args.no_memory,
+        )
+        print(f"✓ 恢复完成 (来源: {backup_dir})")
+        print(f"  备份时间: {manifest['timestamp']}")
+        if manifest.get("includes_memory_zip") and not args.no_memory:
+            print("  memory.zip 已恢复")
+    except (FileNotFoundError, ValueError) as e:
+        print(f"✗ 恢复失败: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_migrate_memory(args: argparse.Namespace) -> None:
@@ -301,9 +398,9 @@ def dispatch(args: argparse.Namespace) -> None:
     elif command == "migrate-memory":
         _cmd_migrate_memory(args)
     elif command == "backup":
-        _cmd_not_implemented("backup")
+        _cmd_backup(args)
     elif command == "restore":
-        _cmd_not_implemented("restore")
+        _cmd_restore(args)
     elif command == "admin-passwd":
         _cmd_not_implemented("admin-passwd")
     else:

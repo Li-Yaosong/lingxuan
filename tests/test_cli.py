@@ -180,7 +180,7 @@ class TestDbRevision:
 class TestPlaceholders:
     @pytest.mark.parametrize(
         "subcommand",
-        ["backup", "restore", "admin-passwd"],
+        ["admin-passwd"],
     )
     def test_placeholder_exits_nonzero(self, subcommand: str) -> None:
         """Placeholder subcommands exit with code 1."""
@@ -190,7 +190,7 @@ class TestPlaceholders:
 
     @pytest.mark.parametrize(
         "subcommand",
-        ["backup", "restore", "admin-passwd"],
+        ["admin-passwd"],
     )
     def test_placeholder_prints_not_implemented(self, subcommand: str, capsys: pytest.CaptureFixture[str]) -> None:
         """Placeholder subcommands print a not-implemented message to stderr."""
