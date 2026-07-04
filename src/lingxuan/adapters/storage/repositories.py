@@ -1,9 +1,9 @@
 """SQLite-backed repository implementations using SQLAlchemy 2.0 async ORM.
 
 This module provides ``SqlSessionRepository`` (P2-04),
-``SqlUserProfileRepository`` (P2-05), and ``SqlSocialGraphRepository`` (P2-06).
-Additional repositories (Config, Audit, PluginConfig, AdminUser) will be
-added by P2-07.
+``SqlUserProfileRepository`` (P2-05), ``SqlSocialGraphRepository`` (P2-06),
+``SqlConfigRepository``, ``SqlAuditRepository``,
+``SqlPluginConfigRepository``, and ``SqlAdminUserRepository`` (P2-07).
 """
 
 from __future__ import annotations
@@ -17,16 +17,28 @@ from sqlalchemy.orm import selectinload
 
 from lingxuan.adapters.storage.db import Database
 from lingxuan.adapters.storage.orm import (
+    AdminUser as AdminUserRow,
+    AuditLog as AuditLogRow,
     NameIndex as NameIndexRow,
+    PluginConfig as PluginConfigRow,
     Session as SessionRow,
     SessionEntity as SessionEntityRow,
     SessionMessage as SessionMessageRow,
+    Setting as SettingRow,
     SocialEdge as SocialEdgeRow,
     UserFact as UserFactRow,
     UserProfile as UserProfileRow,
 )
 from lingxuan.protocols.messaging import SessionId
-from lingxuan.protocols.repositories import Session, SocialEdge, StoredMessage, UserFact, UserProfile
+from lingxuan.protocols.repositories import (
+    AdminUserRow as AdminUserDTO,
+    AuditEntry,
+    Session,
+    SocialEdge,
+    StoredMessage,
+    UserFact,
+    UserProfile,
+)
 
 
 def _now_iso() -> str:
@@ -754,3 +766,315 @@ class SqlUserProfileRepository:
                 sa_delete(UserProfileRow)
             )
             return result.rowcount  # type: ignore[return-value]
+
+
+# ===========================================================================
+# SqlConfigRepository  (P2-07)
+# ===========================================================================
+
+
+class SqlConfigRepository:
+    """SQLite-backed implementation of ``ConfigRepository`` Protocol.
+
+    Values are JSON-serialised into ``value_json``; ``is_secret`` and
+    ``group_name`` are backfilled from ``settings_defaults`` when available.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get_all(self) -> dict[str, object]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SettingRow.key, SettingRow.value_json)
+            )
+            return {key: json.loads(vjson) for key, vjson in result.all()}
+
+    async def set(self, key: str, value: object) -> None:
+        # Backfill is_secret / group_name from settings_defaults
+        group_name: str | None = None
+        is_secret = False
+        try:
+            from lingxuan.settings_defaults import SETTINGS_BY_KEY
+
+            spec = SETTINGS_BY_KEY.get(key)
+            if spec is not None:
+                group_name = spec.group
+                is_secret = spec.is_secret
+        except ImportError:
+            pass
+
+        async with self._db.session() as s:
+            stmt = sqlite_insert(SettingRow).values(
+                key=key,
+                value_json=json.dumps(value, ensure_ascii=False),
+                group_name=group_name,
+                is_secret=is_secret,
+                updated_at=_now_iso(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["key"],
+                set_={
+                    "value_json": stmt.excluded.value_json,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            await s.execute(stmt)
+
+    async def bulk_set(self, items: dict[str, object]) -> None:
+        if not items:
+            return
+        async with self._db.session() as s:
+            for key, value in items.items():
+                group_name: str | None = None
+                is_secret = False
+                try:
+                    from lingxuan.settings_defaults import SETTINGS_BY_KEY
+
+                    spec = SETTINGS_BY_KEY.get(key)
+                    if spec is not None:
+                        group_name = spec.group
+                        is_secret = spec.is_secret
+                except ImportError:
+                    pass
+
+                stmt = sqlite_insert(SettingRow).values(
+                    key=key,
+                    value_json=json.dumps(value, ensure_ascii=False),
+                    group_name=group_name,
+                    is_secret=is_secret,
+                    updated_at=_now_iso(),
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["key"],
+                    set_={
+                        "value_json": stmt.excluded.value_json,
+                        "updated_at": stmt.excluded.updated_at,
+                    },
+                )
+                await s.execute(stmt)
+
+
+# ===========================================================================
+# SqlAuditRepository  (P2-07)
+# ===========================================================================
+
+
+def _row_to_audit_entry(row: AuditLogRow) -> AuditEntry:
+    """Convert an ORM ``AuditLogRow`` to a Protocol ``AuditEntry`` DTO."""
+    created_at: datetime
+    if isinstance(row.created_at, str) and row.created_at:
+        created_at = datetime.fromisoformat(row.created_at)
+    else:
+        created_at = datetime.now(timezone.utc)
+
+    return AuditEntry(
+        id=row.id,
+        actor=row.actor or "",
+        action=row.action or "",
+        target=row.target or "",
+        detail=json.loads(row.detail_json) if row.detail_json else {},
+        ip=row.ip or "",
+        success=row.success,
+        created_at=created_at,
+    )
+
+
+class SqlAuditRepository:
+    """SQLite-backed implementation of ``AuditRepository`` Protocol.
+
+    ``query`` uses keyset pagination (``before_id``) for efficient
+    descending traversal.
+    """
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def record(
+        self,
+        *,
+        actor: str,
+        action: str,
+        target: str = "",
+        detail: dict | None = None,
+        ip: str = "",
+        success: bool = True,
+    ) -> None:
+        async with self._db.session() as s:
+            row = AuditLogRow(
+                actor=actor,
+                action=action,
+                target=target,
+                detail_json=json.dumps(detail, ensure_ascii=False) if detail else None,
+                ip=ip,
+                success=success,
+                created_at=_now_iso(),
+            )
+            s.add(row)
+
+    async def query(
+        self,
+        *,
+        actor: str | None = None,
+        action: str | None = None,
+        limit: int = 100,
+        before_id: int | None = None,
+    ) -> list[AuditEntry]:
+        async with self._db.session() as s:
+            stmt = select(AuditLogRow).order_by(AuditLogRow.id.desc())
+            if actor is not None:
+                stmt = stmt.where(AuditLogRow.actor == actor)
+            if action is not None:
+                stmt = stmt.where(AuditLogRow.action == action)
+            if before_id is not None:
+                stmt = stmt.where(AuditLogRow.id < before_id)
+            stmt = stmt.limit(limit)
+            result = await s.execute(stmt)
+            rows = result.scalars().all()
+            return [_row_to_audit_entry(r) for r in rows]
+
+
+# ===========================================================================
+# SqlPluginConfigRepository  (P2-07)
+# ===========================================================================
+
+
+class SqlPluginConfigRepository:
+    """SQLite-backed implementation of ``PluginConfigRepository`` Protocol."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get(self, name: str) -> tuple[bool, dict] | None:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(PluginConfigRow).where(PluginConfigRow.name == name)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return (row.enabled, json.loads(row.config_json))
+
+    async def upsert(self, name: str, *, enabled: bool, config: dict) -> None:
+        async with self._db.session() as s:
+            stmt = sqlite_insert(PluginConfigRow).values(
+                name=name,
+                enabled=enabled,
+                config_json=json.dumps(config, ensure_ascii=False),
+                updated_at=_now_iso(),
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["name"],
+                set_={
+                    "enabled": stmt.excluded.enabled,
+                    "config_json": stmt.excluded.config_json,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            await s.execute(stmt)
+
+    async def all(self) -> dict[str, tuple[bool, dict]]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(PluginConfigRow)
+            )
+            rows = result.scalars().all()
+            return {
+                row.name: (row.enabled, json.loads(row.config_json))
+                for row in rows
+            }
+
+
+# ===========================================================================
+# SqlAdminUserRepository  (P2-07)
+# ===========================================================================
+
+
+def _row_to_admin_user(row: AdminUserRow) -> AdminUserDTO:
+    """Convert an ORM ``AdminUserRow`` to a Protocol ``AdminUserRow`` DTO."""
+    created_at: datetime
+    if isinstance(row.created_at, str) and row.created_at:
+        created_at = datetime.fromisoformat(row.created_at)
+    else:
+        created_at = datetime.now(timezone.utc)
+
+    last_login_at: datetime | None = None
+    if isinstance(row.last_login_at, str) and row.last_login_at:
+        last_login_at = datetime.fromisoformat(row.last_login_at)
+
+    return AdminUserDTO(
+        id=row.id,
+        username=row.username,
+        password_hash=row.password_hash,
+        role=row.role,
+        must_change_password=row.must_change_password,
+        created_at=created_at,
+        last_login_at=last_login_at,
+    )
+
+
+class SqlAdminUserRepository:
+    """SQLite-backed implementation of ``AdminUserRepository`` Protocol."""
+
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    async def get_by_username(self, username: str) -> AdminUserDTO | None:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(AdminUserRow).where(AdminUserRow.username == username)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return _row_to_admin_user(row)
+
+    async def create(
+        self,
+        *,
+        username: str,
+        password_hash: str,
+        role: str,
+        must_change_password: bool = True,
+    ) -> None:
+        async with self._db.session() as s:
+            row = AdminUserRow(
+                username=username,
+                password_hash=password_hash,
+                role=role,
+                must_change_password=must_change_password,
+                created_at=_now_iso(),
+            )
+            s.add(row)
+
+    async def set_password(
+        self,
+        username: str,
+        password_hash: str,
+        *,
+        must_change_password: bool = False,
+    ) -> None:
+        async with self._db.session() as s:
+            await s.execute(
+                update(AdminUserRow)
+                .where(AdminUserRow.username == username)
+                .values(
+                    password_hash=password_hash,
+                    must_change_password=must_change_password,
+                )
+            )
+
+    async def touch_login(self, username: str) -> None:
+        async with self._db.session() as s:
+            await s.execute(
+                update(AdminUserRow)
+                .where(AdminUserRow.username == username)
+                .values(last_login_at=_now_iso())
+            )
+
+    async def count(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(AdminUserRow)
+            )
+            return result.scalar_one()
