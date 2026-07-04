@@ -262,37 +262,44 @@ async def test_full_migration(db: Database, sample_source: Path) -> None:
     # Sessions: private_10001, group_30001, group_30002
     assert report.sessions.scanned == 3
     assert report.sessions.inserted == 3
+    assert report.sessions.updated == 0
     assert report.sessions.skipped == 0
     assert await _count(db, SessionRow) == 3
 
     # Messages: 4 + 2 + 1 = 7
     assert report.messages.scanned == 7
     assert report.messages.inserted == 7
+    assert report.messages.updated == 0
     assert await _count(db, SessionMessageRow) == 7
 
     # Entities: 小堞宝 in private_10001, 小刚 + 小芳 in group_30002 = 3
     assert report.entities.scanned == 3
     assert report.entities.inserted == 3
+    assert report.entities.updated == 0
     assert await _count(db, SessionEntityRow) == 3
 
     # User profiles: 10001 + 10002
     assert report.user_profiles.scanned == 2
     assert report.user_profiles.inserted == 2
+    assert report.user_profiles.updated == 0
     assert await _count(db, UserProfileRow) == 2
 
     # Facts: 2 (10001) + 1 (10002) = 3
     assert report.user_facts.scanned == 3
     assert report.user_facts.inserted == 3
+    assert report.user_facts.updated == 0
     assert await _count(db, UserFactRow) == 3
 
-    # Social edges: 3 scanned, 2 inserted (1 deduped)
+    # Social edges: 3 scanned, 2 inserted (1 deduped), 0 updated
     assert report.social_edges.scanned == 3
     assert report.social_edges.inserted == 2
+    assert report.social_edges.updated == 0
     assert await _count(db, SocialEdgeRow) == 2
 
     # Name index: 3 entries
     assert report.name_index.scanned == 3
     assert report.name_index.inserted == 3
+    assert report.name_index.updated == 0
     assert await _count(db, NameIndexRow) == 3
 
 
@@ -398,7 +405,26 @@ async def test_idempotency(db: Database, sample_source: Path) -> None:
 
     assert counts1 == counts2, f"Row counts changed on second run: {counts1} → {counts2}"
 
-    # The second run's report should still scan the same files but not increase counts
+    # The second run should report all rows as "updated" (no new "inserted")
+    assert report2.sessions.inserted == 0
+    assert report2.sessions.updated == report1.sessions.inserted
+    assert report2.messages.inserted == 0
+    assert report2.messages.updated == report1.messages.inserted
+    assert report2.entities.inserted == 0
+    assert report2.entities.updated == report1.entities.inserted
+    assert report2.user_profiles.inserted == 0
+    assert report2.user_profiles.updated == report1.user_profiles.inserted
+    assert report2.user_facts.inserted == 0
+    assert report2.user_facts.updated == report1.user_facts.inserted
+    assert report2.name_index.inserted == 0
+    assert report2.name_index.updated == report1.name_index.inserted
+
+    # Social edges use ON CONFLICT DO NOTHING — duplicates are neither
+    # inserted nor updated on second run
+    assert report2.social_edges.inserted == 0
+    assert report2.social_edges.updated == 0
+
+    # Scan counts remain the same
     assert report2.sessions.scanned == report1.sessions.scanned
     assert report2.messages.scanned == report1.messages.scanned
 
@@ -573,10 +599,11 @@ async def test_report_serialisation(db: Database, sample_source: Path) -> None:
     assert "elapsed_seconds" in d
     assert "timestamp" in d
 
-    # Each domain should have scanned/inserted/skipped
+    # Each domain should have scanned/inserted/updated/skipped
     for domain in ["sessions", "messages", "entities", "user_profiles", "user_facts", "social_edges", "name_index"]:
         assert "scanned" in d[domain]
         assert "inserted" in d[domain]
+        assert "updated" in d[domain]
         assert "skipped" in d[domain]
 
 

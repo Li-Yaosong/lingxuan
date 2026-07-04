@@ -287,6 +287,7 @@ async def run_auto_migrate(
                     data_root,
                     auto_snapshot=False,
                     restore_memory=False,
+                    skip_lock_check=True,
                 )
                 result.rolled_back = True
                 logger.info("自动迁移: 回滚完成")
