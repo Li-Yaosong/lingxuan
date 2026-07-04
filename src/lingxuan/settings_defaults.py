@@ -100,7 +100,7 @@ SETTINGS: list[SettingSpec] = [
                 description="Root directory for data files"),
     SettingSpec("AUTO_MIGRATE", "bool", True, "storage",
                 hot_reloadable=False,
-                description="Auto-run Alembic migration on startup"),
+                description="Auto-run Alembic migration + first-run JSON import on startup; false = schema only"),
     # ── admin ────────────────────────────────────────────────────────────
     SettingSpec("ADMIN_HOST", "str", "127.0.0.1", "admin",
                 hot_reloadable=False,

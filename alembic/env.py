@@ -71,6 +71,13 @@ def _ensure_db_dir(url: str) -> None:
     db_path = parsed.path
     if not db_path or db_path == ":memory:":
         return
+    # On Windows, urlparse gives "/C:/data/file.db" for absolute paths.
+    # Strip leading slash if it reveals a Windows drive letter (C:/...).
+    if db_path.startswith("/") and len(db_path) >= 3 and db_path[2] == ":":
+        db_path = db_path[1:]
+    # On POSIX relative paths, strip the leading slash too.
+    elif db_path.startswith("/") and not os.path.isabs(db_path):
+        db_path = db_path[1:]
     parent = Path(db_path).parent
     if parent and not parent.exists():
         parent.mkdir(parents=True, exist_ok=True)

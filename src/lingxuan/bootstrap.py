@@ -34,13 +34,21 @@ def _validate_config(container: Container) -> list[str]:
 
 
 async def _startup(container: Container) -> None:
-    """Startup hook: ensure DB schema, validate config, init user memory, print summary."""
+    """Startup hook: auto-migrate, validate config, init user memory, print summary."""
     logger = nonebot.logger
 
-    # Ensure DB schema is at the latest Alembic revision.
-    # Uses alembic upgrade head (sync) so that alembic_version is stamped
-    # correctly for future incremental migrations.
-    container.db.ensure_schema()
+    # Auto-migrate: schema upgrade + first-run JSON import (controlled by AUTO_MIGRATE).
+    from lingxuan.migration.auto import AutoMigrateError, run_auto_migrate
+
+    try:
+        result = await run_auto_migrate(container.db, container.config)
+        if result.import_performed:
+            logger.info("自动迁移: 首次数据导入已完成")
+        elif result.import_needed and not result.import_performed:
+            logger.warning("自动迁移: 需要导入但未执行 (检查日志)")
+    except AutoMigrateError as exc:
+        logger.error("自动迁移失败, 拒绝启动: {}", exc)
+        raise
 
     # Load DB values into ConfigProvider (triggers _ensure_db_loaded on first access)
     _ = container.config_repo
