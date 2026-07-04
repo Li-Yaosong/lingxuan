@@ -34,16 +34,22 @@ def _validate_config(container: Container) -> list[str]:
 
 
 async def _startup(container: Container) -> None:
-    """Startup hook: validate config, init user memory, print summary."""
+    """Startup hook: ensure DB, validate config, init user memory, print summary."""
     logger = nonebot.logger
+
+    # Ensure DB schema exists (Phase 2: create_all; Phase 3 adds alembic migration)
+    await container.db.create_all()
+
+    # Load DB values into ConfigProvider (triggers _ensure_db_loaded on first access)
+    _ = container.config_repo
+
+    # Initialize user memory service
+    await container.user_memory.ensure_user_memory_initialized()
+
+    # Validate config
     issues = _validate_config(container)
 
-    # Initialize user memory (aligns with MVP ensure_user_memory_initialized)
-    from lingxuan.user_memory import ensure_user_memory_initialized
-
-    ensure_user_memory_initialized()
-
-    # Print config summary (aligns with MVP startup_check)
+    # Print config summary
     cfg = await container.config.get_all()
     logger.info("灵轩配置摘要: {}", cfg)
 
@@ -53,9 +59,12 @@ async def _startup(container: Container) -> None:
     if not issues:
         logger.info("配置检查通过")
 
+    logger.info("SQLite 存储就绪")
+
 
 async def _shutdown(container: Container) -> None:
-    """Shutdown hook: log departure."""
+    """Shutdown hook: dispose DB, log departure."""
+    await container.db.dispose()
     nonebot.logger.info("灵轩下线~")
 
 

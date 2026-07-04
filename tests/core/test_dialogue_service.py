@@ -68,7 +68,7 @@ class FakeUserMemoryService:
         self.cognition_refine_calls: list[dict] = []
         self.memory_extract_calls: list[dict] = []
 
-    def on_user_message(
+    async def on_user_message(
         self,
         user_id: int,
         text: str,
@@ -85,7 +85,7 @@ class FakeUserMemoryService:
             "session_id": session_id,
         })
 
-    def schedule_cognition_refine(
+    async def schedule_cognition_refine(
         self,
         user_id: int,
         *,
@@ -96,7 +96,7 @@ class FakeUserMemoryService:
             "recent_exchange": recent_exchange,
         })
 
-    def schedule_memory_extract(
+    async def schedule_memory_extract(
         self,
         user_id: int,
         text: str,

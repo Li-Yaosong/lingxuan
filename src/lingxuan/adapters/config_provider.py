@@ -1,8 +1,11 @@
 """EnvConfigProvider: env + memory config with subscribe support.
 
-Resolution priority (Phase 1): memory override (``set``) > DB repo > .env > defaults.
+Resolution priority: memory override (``set``) > DB repo > .env > defaults.
 DB repo is optional; when provided, its values are loaded once at startup and
 sit between env and defaults in priority.
+
+Phase 2 (P2-10): ``set`` persists to DB repo and records an audit log entry
+when an ``AuditRepository`` is injected.
 """
 
 from __future__ import annotations
@@ -13,22 +16,23 @@ from collections.abc import Callable
 from dotenv import load_dotenv
 
 from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe
-from lingxuan.protocols.repositories import ConfigRepository
+from lingxuan.protocols.repositories import AuditRepository, ConfigRepository
 from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, mask_secret, parse_value
 
 
 class EnvConfigProvider:
     """ConfigProvider backed by settings_defaults + .env + optional DB repo.
 
-    Phase 1: DB persistence is optional. ``set`` updates memory and triggers
-    callbacks; if ``db_repo`` is provided, it also persists to DB.
-    Phase 2 will add full DB layering (P2-07/P2-10).
+    Phase 2: DB persistence via ``db_repo``; audit logging via ``audit_repo``.
+    ``set`` updates memory, persists to DB, records audit, and triggers
+    callbacks.
     """
 
     def __init__(
         self,
         *,
         db_repo: ConfigRepository | None = None,
+        audit_repo: AuditRepository | None = None,
         dotenv_path: str | None = None,
         _skip_dotenv: bool = False,
     ) -> None:
@@ -45,11 +49,14 @@ class EnvConfigProvider:
             if env_val is not None:
                 self._values[spec.key] = parse_value(spec, env_val)
 
-        # 4. DB repo: load once at startup (Phase 1)
+        # 4. DB repo: load once at startup
         self._db_repo = db_repo
         self._db_loaded = False
 
-        # 5. Memory overrides (from ``set`` calls)
+        # 5. Audit repo for set() logging
+        self._audit_repo = audit_repo
+
+        # 6. Memory overrides (from ``set`` calls)
         self._overrides: dict[str, object] = {}
 
         self._subscribers: list[ConfigChangeCallback] = []
@@ -154,6 +161,14 @@ class EnvConfigProvider:
         self._overrides[key] = value
         if self._db_repo is not None:
             await self._db_repo.set(key, value)
+        if self._audit_repo is not None:
+            await self._audit_repo.record(
+                actor=actor,
+                action="config_set",
+                target=key,
+                detail={"value": str(value)},
+                success=True,
+            )
         for cb in list(self._subscribers):
             cb(key, value)
 

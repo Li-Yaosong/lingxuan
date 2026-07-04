@@ -492,7 +492,7 @@ class ObservationService:
             self._memory.schedule_summarize(session_id)
 
             # Schedule cognition refine (aligns with MVP direct-@ path)
-            self._user_memory.schedule_cognition_refine(
+            await self._user_memory.schedule_cognition_refine(
                 user_id,
                 recent_exchange=_format_exchange(
                     self._bot_name, nickname, observation, reply_text

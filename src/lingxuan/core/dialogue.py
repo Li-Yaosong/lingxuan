@@ -154,7 +154,7 @@ class DialogueService:
         # Normal private chat flow
         nickname = inbound.actor.nickname or str(inbound.actor.user_id)
 
-        self._user_memory.on_user_message(
+        await self._user_memory.on_user_message(
             inbound.actor.user_id,
             inbound.text,
             nickname=nickname,
@@ -194,7 +194,7 @@ class DialogueService:
         )
         await self._transport.send(out)
 
-        self._user_memory.schedule_cognition_refine(
+        await self._user_memory.schedule_cognition_refine(
             inbound.actor.user_id,
             recent_exchange=_format_exchange(
                 self._bot_name, nickname, inbound.text, reply
@@ -264,7 +264,7 @@ class DialogueService:
         # Entity learning / memory extract (Phase 5: plugin takes over;
         # Phase 1: keep direct call via user_memory.schedule_memory_extract)
         clean_message = inbound.text.strip() or ("在呢" if at_bot else "")
-        self._user_memory.schedule_memory_extract(
+        await self._user_memory.schedule_memory_extract(
             inbound.actor.user_id,
             clean_message,
             nickname=nickname,
@@ -336,7 +336,7 @@ class DialogueService:
             self._memory.schedule_summarize(inbound.session_id)
 
             # Schedule cognition refine
-            self._user_memory.schedule_cognition_refine(
+            await self._user_memory.schedule_cognition_refine(
                 inbound.actor.user_id,
                 recent_exchange=_format_exchange(
                     self._bot_name, nickname, clean_message, reply_text

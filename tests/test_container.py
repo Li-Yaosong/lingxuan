@@ -1,17 +1,26 @@
-"""Container construction test: build with fakes, verify key attribute types."""
+"""Container construction test: build with fakes, verify key attribute types.
+
+Phase 2 (P2-10): Container now uses SQLite repos by default. Tests that need
+fakes should override ``config``, ``db``, and the repos they care about.
+The helper ``_build_test_container`` creates a Container with an in-memory
+SQLite database and fake adapters for config/clock/log/llm/transport.
+"""
 
 from __future__ import annotations
 
 import pytest
 
+from lingxuan.adapters.storage.db import Database
 from lingxuan.container import Container, build_container
 from lingxuan.core.admin_commands import AdminCommandService
 from lingxuan.core.dialogue import DialogueService
+from lingxuan.core.memory import MemoryService
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
+from lingxuan.core.user_memory import UserMemoryService
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
@@ -28,14 +37,19 @@ from tests.fakes.transport import FakeTransport
 
 
 def _build_test_container() -> Container:
-    """Build a Container with fakes instead of real adapters."""
+    """Build a Container with fakes instead of real adapters.
+
+    Uses an in-memory SQLite DB so the SQL repos can work without
+    touching the filesystem.
+    """
     c = Container()
     c.override("config", FakeConfigProvider)
     c.override("clock", FakeClock)
     c.override("log", FakeLogSink)
     c.override("llm", FakeLLMProvider)
     c.override("transport", FakeTransport)
-    c.override("session_repo", InMemorySessionRepository)
+    # Use in-memory SQLite for the DB
+    c.override("db", Database("sqlite+aiosqlite://"))
     return c
 
 
@@ -44,7 +58,6 @@ class TestContainerConstruction:
 
     def test_build_does_not_throw(self) -> None:
         c = _build_test_container()
-        # Just constructing the container should not raise
         assert c is not None
 
     def test_config_type(self) -> None:
@@ -85,7 +98,18 @@ class TestContainerConstruction:
 
     def test_session_repo_type(self) -> None:
         c = _build_test_container()
-        assert isinstance(c.session_repo, InMemorySessionRepository)
+        # Now backed by SqlSessionRepository
+        from lingxuan.adapters.storage.repositories import SqlSessionRepository
+
+        assert isinstance(c.session_repo, SqlSessionRepository)
+
+    def test_memory_type(self) -> None:
+        c = _build_test_container()
+        assert isinstance(c.memory, MemoryService)
+
+    def test_user_memory_type(self) -> None:
+        c = _build_test_container()
+        assert isinstance(c.user_memory, UserMemoryService)
 
     def test_observation_type(self) -> None:
         c = _build_test_container()
@@ -141,6 +165,7 @@ class TestContainerOverride:
         c.override("config", FakeConfigProvider)
         c.override("clock", FakeClock)
         c.override("log", FakeLogSink)
+        c.override("db", Database("sqlite+aiosqlite://"))
         custom_repo = InMemorySessionRepository()
         c.override("session_repo", custom_repo)
         assert c.session_repo is custom_repo
@@ -155,8 +180,6 @@ class TestBuildContainer:
 
     def test_build_container_config_builder(self) -> None:
         c = build_container()
-        # The _build_config method should produce EnvConfigProvider
         from lingxuan.adapters.config_provider import EnvConfigProvider
 
         assert hasattr(c, "_build_config")
-        # Can't instantiate without .env, but the builder method exists

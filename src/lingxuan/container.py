@@ -1,8 +1,7 @@
 """Lightweight DI container: lazy singleton construction with dependency ordering.
 
-Phase 1 temporary adapters (wrapping MVP memory.py / user_memory.py) live here
-as private inner classes.  Phase 2 will replace them with Repository-based
-implementations injected via ``override()``.
+Phase 2: SQLite Repository implementations replace the Phase 1 legacy wrappers.
+All persistence now goes through Database + Sql*Repository classes.
 """
 
 from __future__ import annotations
@@ -14,6 +13,16 @@ from lingxuan.adapters.config_provider import EnvConfigProvider
 from lingxuan.adapters.logging.sink import BridgeLogSink
 from lingxuan.adapters.onebot.transport import OneBotTransport
 from lingxuan.adapters.openai.provider import OpenAIProvider
+from lingxuan.adapters.storage.db import Database
+from lingxuan.adapters.storage.repositories import (
+    SqlAdminUserRepository,
+    SqlAuditRepository,
+    SqlConfigRepository,
+    SqlPluginConfigRepository,
+    SqlSessionRepository,
+    SqlSocialGraphRepository,
+    SqlUserProfileRepository,
+)
 from lingxuan.core.admin_commands import (
     AdminCommandService,
     MemoryAccess,
@@ -21,277 +30,162 @@ from lingxuan.core.admin_commands import (
     UserMemoryAccess,
 )
 from lingxuan.core.group_reply_executor import GroupReplyExecutor
+from lingxuan.core.memory import MemoryService
 from lingxuan.core.observation import ObservationService
 from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
+from lingxuan.core.user_memory import UserMemoryService
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
-from lingxuan.protocols.memory import MemoryService, UserMemoryService
+from lingxuan.protocols.memory import MemoryService as MemoryServiceProtocol
+from lingxuan.protocols.memory import UserMemoryService as UserMemoryServiceProtocol
 from lingxuan.protocols.messaging import MessageTransport, SessionId
-from lingxuan.protocols.repositories import SessionRepository, StoredMessage
+from lingxuan.protocols.repositories import (
+    AdminUserRepository,
+    AuditRepository,
+    ConfigRepository,
+    PluginConfigRepository,
+    SessionRepository,
+    SocialGraphRepository,
+    StoredMessage,
+    UserProfileRepository,
+)
 
 if TYPE_CHECKING:
     from lingxuan.core.dialogue import DialogueService
 
 
 # ---------------------------------------------------------------------------
-# Phase 1 temporary adapters — thin wrappers over MVP modules
+# DB-backed MemoryAccess / UserMemoryAccess / ObservationAccess for AdminCommandService
 # ---------------------------------------------------------------------------
 
 
-class _LegacyMemoryService:
-    """Phase 1 MemoryService wrapping MVP memory.py.
+class _DbMemoryAccess:
+    """MemoryAccess backed by SessionRepository (DB)."""
 
-    Delegates to the module-level functions in ``lingxuan.memory``.
-    Phase 2 will replace this with a SessionRepository-based implementation.
-    """
-
-    async def append_message(self, session_id: SessionId, msg: StoredMessage) -> None:
-        from lingxuan.memory import append_message as _append
-
-        _append(
-            session_id.as_str(),
-            msg.role,
-            msg.content,
-            user_id=msg.user_id,
-        )
-
-    async def update_meta(
-        self,
-        session_id: SessionId,
-        *,
-        nickname: str | None = None,
-        group_id: int | None = None,
-    ) -> None:
-        from lingxuan.memory import update_meta as _update
-
-        kwargs: dict[str, object] = {}
-        if nickname is not None:
-            kwargs["nickname"] = nickname
-        if group_id is not None:
-            kwargs["group_id"] = group_id
-        _update(session_id.as_str(), **kwargs)
-
-    def schedule_summarize(self, session_id: SessionId) -> None:
-        from lingxuan.memory import schedule_summarize as _schedule
-
-        _schedule(session_id.as_str())
-
-
-class _LegacyUserMemoryService:
-    """Phase 1 UserMemoryService wrapping MVP user_memory.py.
-
-    Delegates to the module-level functions in ``lingxuan.user_memory``.
-    Phase 2 will replace this with a Repository-based implementation.
-    """
-
-    def on_user_message(
-        self,
-        user_id: int,
-        text: str,
-        *,
-        nickname: str = "",
-        is_private: bool = False,
-        session_id: SessionId | None = None,
-    ) -> None:
-        from lingxuan.user_memory import on_user_message as _on
-
-        _on(
-            user_id,
-            text,
-            nickname=nickname,
-            is_private=is_private,
-            session_id=session_id.as_str() if session_id else "",
-        )
-
-    def schedule_cognition_refine(
-        self,
-        user_id: int,
-        *,
-        recent_exchange: str = "",
-    ) -> None:
-        from lingxuan.user_memory import schedule_cognition_refine as _schedule
-
-        _schedule(user_id, recent_exchange=recent_exchange)
-
-    def schedule_memory_extract(
-        self,
-        user_id: int,
-        text: str,
-        *,
-        nickname: str = "",
-        group_id: int | None = None,
-        context_lines: list[str] | None = None,
-    ) -> None:
-        from lingxuan.user_memory import schedule_memory_extract as _schedule
-
-        _schedule(
-            user_id,
-            text,
-            nickname=nickname,
-            group_id=group_id,
-            context_lines=context_lines,
-        )
-
-
-class _LegacyMemoryAccess:
-    """Phase 1 MemoryAccess for AdminCommandService, wrapping MVP memory.py."""
+    def __init__(self, sessions: SessionRepository) -> None:
+        self._sessions = sessions
 
     async def count_messages(self, session_id: SessionId) -> int:
-        from lingxuan.memory import load_history
-
-        return len(load_history(session_id.as_str()))
+        return await self._sessions.count_messages(session_id)
 
     async def clear(self, session_id: SessionId) -> None:
-        from lingxuan.memory import clear_history
-
-        clear_history(session_id.as_str())
+        await self._sessions.clear(session_id)
 
     async def get_summary(self, session_id: SessionId) -> str:
-        from lingxuan.memory import get_summary
-
-        return get_summary(session_id.as_str()) or ""
+        return await self._sessions.get_summary(session_id)
 
     async def get_meta(self, session_id: SessionId) -> dict:
-        from lingxuan.memory import get_session_meta
+        session = await self._sessions.get(session_id)
+        if session is None:
+            return {}
+        meta: dict[str, object] = {}
+        if session.nickname:
+            meta["nickname"] = session.nickname
+        if session.last_active_at:
+            meta["last_active_at"] = session.last_active_at.isoformat()
+        if session.group_id is not None:
+            meta["group_id"] = session.group_id
+        return meta
 
-        return get_session_meta(session_id.as_str())
 
+class _DbUserMemoryAccess:
+    """UserMemoryAccess backed by UserProfileRepository + SocialGraphRepository."""
 
-class _LegacyUserMemoryAccess:
-    """Phase 1 UserMemoryAccess for AdminCommandService, wrapping MVP user_memory.py."""
+    def __init__(
+        self,
+        profiles: UserProfileRepository,
+        graph: SocialGraphRepository,
+    ) -> None:
+        self._profiles = profiles
+        self._graph = graph
+
+    async def _list_user_ids_async(self) -> list[int]:
+        return await self._profiles.list_user_ids()
 
     def list_user_ids(self) -> list[int]:
-        from lingxuan.user_memory import list_user_profiles
+        import asyncio
 
-        return list_user_profiles()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Inside an existing event loop (e.g. NoneBot) — schedule a task.
+            # AdminCommandService.caller runs in an async context anyway,
+            # but the MemoryAccess protocol declares this as sync.
+            # We use a thread-based fallback to avoid blocking.
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, self._list_user_ids_async())
+                return future.result()
+        return asyncio.run(self._list_user_ids_async())
 
     async def load_profile_summary(self, user_id: int) -> str:
-        from lingxuan.user_memory import format_user_profile_summary
+        from lingxuan.core.models import display_name, stage_label
 
-        return format_user_profile_summary(user_id)
+        profile = await self._profiles.get(user_id)
+        if profile is None:
+            return ""
+        lines = [
+            f"用户: {display_name(profile)} (QQ {user_id})",
+            f"关系: {stage_label(profile.stage)}",
+            f"互动次数: {profile.interaction_count}",
+            f"首选称呼: {profile.preferred_name or '(未设置)'}",
+        ]
+        if profile.aliases:
+            lines.append(f"别名: {', '.join(profile.aliases)}")
+        if profile.cognition_summary:
+            lines.append(f"认知总结: {profile.cognition_summary}")
+        elif profile.impression:
+            lines.append(f"印象: {profile.impression}")
+        return "\n".join(lines)
 
     async def clear_profile(self, user_id: int) -> bool:
-        from lingxuan.user_memory import clear_user_profile
-
-        return clear_user_profile(user_id)
+        return await self._profiles.delete(user_id)
 
     async def clear_all_profiles(self) -> int:
-        from lingxuan.user_memory import clear_all_user_memory
-
-        return clear_all_user_memory()
+        n = await self._profiles.delete_all()
+        await self._graph.clear()
+        return n
 
     async def clear_social_graph(self) -> None:
-        from lingxuan.user_memory import clear_social_graph
-
-        clear_social_graph()
+        await self._graph.clear()
 
 
-class _LegacyObservationAccess:
-    """Phase 1 ObservationAccess for AdminCommandService, wrapping MVP group_observer.py."""
+class _DbObservationAccess:
+    """ObservationAccess backed by ObservationStore."""
+
+    def __init__(self, observation_store: ObservationStore) -> None:
+        self._store = observation_store
 
     def format_observation(self, group_id: int) -> str:
-        from lingxuan.group_observer import format_observation as _fmt
-
-        return _fmt(group_id)
+        entries = self._store.buffer(group_id)
+        if not entries:
+            return ""
+        lines: list[str] = []
+        for entry in entries:
+            name = entry.nickname or str(entry.user_id)
+            lines.append(f"[{name}]: {entry.text}")
+        return "\n".join(lines)
 
     def recent_entries(self, group_id: int, limit: int = 5) -> list:
-        from lingxuan.group_observer import get_recent_entries
-
-        return get_recent_entries(group_id, limit=limit)
+        return self._store.recent(group_id, limit=limit)
 
     def observe_state(self, group_id: int) -> dict:
-        from lingxuan.group_observer import get_observe_state
-
-        return get_observe_state(group_id)
-
-
-class _LegacySessionRepository:
-    """Phase 1 SessionRepository wrapping MVP memory.py.
-
-    Only the surface needed by ObservationService and DialogueService's
-    GroupReplyExecutor is implemented.  Phase 2 replaces with full DB-backed
-    SessionRepository.
-    """
-
-    async def get(self, sid: SessionId):
-        # Not needed by current core services; stub.
-        return None
-
-    async def ensure(self, sid: SessionId, **kwargs):
-        # Not needed by current core services; stub.
-        return None
-
-    async def append_message(self, sid: SessionId, msg: StoredMessage) -> None:
-        from lingxuan.memory import append_message as _append
-
-        _append(sid.as_str(), msg.role, msg.content, user_id=msg.user_id)
-
-    async def load_history(
-        self, sid: SessionId, limit: int | None = None
-    ) -> list[StoredMessage]:
-        from lingxuan.memory import load_history
-
-        raw = load_history(sid.as_str())
-        if limit is not None and limit >= 0:
-            raw = raw[-limit:]
-        return [
-            StoredMessage(
-                role=m.get("role", "user"),
-                content=m.get("content", ""),
-                user_id=m.get("user_id"),
-            )
-            for m in raw
-        ]
-
-    async def count_messages(self, sid: SessionId) -> int:
-        from lingxuan.memory import load_history
-
-        return len(load_history(sid.as_str()))
-
-    async def trim_to_last(self, sid: SessionId, n: int) -> None:
-        from lingxuan.memory import load_history, save_history
-
-        history = load_history(sid.as_str())
-        save_history(sid.as_str(), history[-n:])
-
-    async def get_summary(self, sid: SessionId) -> str:
-        from lingxuan.memory import get_summary
-
-        return get_summary(sid.as_str()) or ""
-
-    async def set_summary(self, sid: SessionId, text: str) -> None:
-        from lingxuan.memory import save_summary
-
-        save_summary(sid.as_str(), text)
-
-    async def clear(self, sid: SessionId) -> None:
-        from lingxuan.memory import clear_history
-
-        clear_history(sid.as_str())
-
-    async def update_meta(self, sid: SessionId, **kwargs) -> None:
-        from lingxuan.memory import update_meta
-
-        update_meta(sid.as_str(), **kwargs)
-
-    async def merge_entity(self, sid: SessionId, name: str, user_id: int) -> None:
-        from lingxuan.memory import merge_entity
-
-        merge_entity(sid.as_str(), name, user_id)
-
-    async def get_entities(self, sid: SessionId) -> dict[str, int]:
-        from lingxuan.memory import get_entities
-
-        return get_entities(sid.as_str())
-
-    async def list_sessions(self) -> list[str]:
-        # Not needed by current core services; stub.
-        return []
+        state = self._store.state(group_id)
+        return {
+            "buffer_len": len(self._store.buffer(group_id)),
+            "last_judge_result": state.last_judge_result,
+            "in_cooldown": state.cooldown_until > 0,
+            "cooldown_remaining": max(0, state.cooldown_until),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -303,8 +197,12 @@ class Container:
     """Lightweight DI container: lazy singletons, topological construction order.
 
     Public properties expose the assembled services.  ``override()`` allows
-    Phase 2+ to swap individual factories (e.g. replace _LegacySessionRepository
-    with a real DB-backed one) without touching the wiring logic.
+    tests to swap individual factories with fakes before first access.
+
+    Boot order: config (no DB) → db → repos → config_repo → attach DB to
+    config → services.  The config is built first *without* db_repo so that
+    ``DB_URL`` can be read from env/defaults; then config_repo is created
+    and retroactively attached.
     """
 
     def __init__(self) -> None:
@@ -316,8 +214,7 @@ class Container:
         """Inject a pre-built instance or factory for *key*.
 
         Must be called *before* the first access to the corresponding
-        property.  Typical use: tests inject fakes; Phase 2 swaps
-        ``session_repo`` with a real DB-backed SessionRepository.
+        property.  Typical use: tests inject fakes.
         """
         if key in self._cache:
             raise RuntimeError(
@@ -342,6 +239,11 @@ class Container:
     # ── builders (one per service, called lazily) ─────────────────────────
 
     def _build_config(self) -> EnvConfigProvider:
+        """Build config WITHOUT db_repo (breaks the config→db→config cycle).
+
+        After db + config_repo are built, ``_attach_config_db`` is called
+        to wire them together.
+        """
         from lingxuan.config import set_global_config
 
         provider = EnvConfigProvider()
@@ -353,6 +255,46 @@ class Container:
 
     def _build_log(self) -> BridgeLogSink:
         return BridgeLogSink()
+
+    def _build_db(self) -> Database:
+        return Database(self.config.get_str("DB_URL"))
+
+    def _build_session_repo(self) -> SqlSessionRepository:
+        return SqlSessionRepository(self.db)
+
+    def _build_user_profile_repo(self) -> SqlUserProfileRepository:
+        return SqlUserProfileRepository(self.db)
+
+    def _build_social_graph_repo(self) -> SqlSocialGraphRepository:
+        return SqlSocialGraphRepository(self.db)
+
+    def _build_config_repo(self) -> SqlConfigRepository:
+        # Ensure audit_repo is built first so it can be attached for set() auditing
+        _ = self.audit_repo
+        repo = SqlConfigRepository(self.db)
+        # Attach DB repo + audit repo to the config provider now that both exist
+        self._attach_config_db(repo)
+        return repo
+
+    def _build_audit_repo(self) -> SqlAuditRepository:
+        return SqlAuditRepository(self.db)
+
+    def _build_plugin_config_repo(self) -> SqlPluginConfigRepository:
+        return SqlPluginConfigRepository(self.db)
+
+    def _build_admin_user_repo(self) -> SqlAdminUserRepository:
+        return SqlAdminUserRepository(self.db)
+
+    def _attach_config_db(self, repo: SqlConfigRepository) -> None:
+        """Wire the ConfigRepository and AuditRepository into the already-built EnvConfigProvider."""
+        cfg = self._cache.get("config")
+        if isinstance(cfg, EnvConfigProvider):
+            cfg._db_repo = repo
+            cfg._db_loaded = False
+            # Also attach audit repo for set() auditing
+            audit = self._cache.get("audit_repo")
+            if isinstance(audit, SqlAuditRepository):
+                cfg._audit_repo = audit
 
     def _build_llm(self) -> OpenAIProvider:
         return OpenAIProvider(self.config, self.log)
@@ -382,23 +324,35 @@ class Container:
             config=self.config,
         )
 
-    def _build_session_repo(self) -> _LegacySessionRepository:
-        return _LegacySessionRepository()
+    def _build_memory(self) -> MemoryService:
+        return MemoryService(
+            sessions=self.session_repo,
+            llm=self.llm,
+            prompt=self.prompt,
+            config=self.config,
+            clock=self.clock,
+            log=self.log,
+            user_memory=self.user_memory,
+        )
 
-    def _build_memory(self) -> _LegacyMemoryService:
-        return _LegacyMemoryService()
+    def _build_user_memory(self) -> UserMemoryService:
+        return UserMemoryService(
+            profiles=self.user_profile_repo,
+            graph=self.social_graph_repo,
+            llm=self.llm,
+            config=self.config,
+            clock=self.clock,
+            log=self.log,
+        )
 
-    def _build_user_memory(self) -> _LegacyUserMemoryService:
-        return _LegacyUserMemoryService()
+    def _build_memory_access(self) -> _DbMemoryAccess:
+        return _DbMemoryAccess(self.session_repo)
 
-    def _build_memory_access(self) -> _LegacyMemoryAccess:
-        return _LegacyMemoryAccess()
+    def _build_user_memory_access(self) -> _DbUserMemoryAccess:
+        return _DbUserMemoryAccess(self.user_profile_repo, self.social_graph_repo)
 
-    def _build_user_memory_access(self) -> _LegacyUserMemoryAccess:
-        return _LegacyUserMemoryAccess()
-
-    def _build_observation_access(self) -> _LegacyObservationAccess:
-        return _LegacyObservationAccess()
+    def _build_observation_access(self) -> _DbObservationAccess:
+        return _DbObservationAccess(self.observation_store)
 
     def _build_observation(self) -> ObservationService:
         return ObservationService(
@@ -455,6 +409,10 @@ class Container:
         return self._get_or_build("log")  # type: ignore[return-value]
 
     @property
+    def db(self) -> Database:
+        return self._get_or_build("db")  # type: ignore[return-value]
+
+    @property
     def llm(self) -> LLMProvider:
         return self._get_or_build("llm")  # type: ignore[return-value]
 
@@ -487,11 +445,35 @@ class Container:
         return self._get_or_build("session_repo")  # type: ignore[return-value]
 
     @property
-    def memory(self) -> MemoryService:
+    def user_profile_repo(self) -> UserProfileRepository:
+        return self._get_or_build("user_profile_repo")  # type: ignore[return-value]
+
+    @property
+    def social_graph_repo(self) -> SocialGraphRepository:
+        return self._get_or_build("social_graph_repo")  # type: ignore[return-value]
+
+    @property
+    def config_repo(self) -> ConfigRepository:
+        return self._get_or_build("config_repo")  # type: ignore[return-value]
+
+    @property
+    def audit_repo(self) -> AuditRepository:
+        return self._get_or_build("audit_repo")  # type: ignore[return-value]
+
+    @property
+    def plugin_config_repo(self) -> PluginConfigRepository:
+        return self._get_or_build("plugin_config_repo")  # type: ignore[return-value]
+
+    @property
+    def admin_user_repo(self) -> AdminUserRepository:
+        return self._get_or_build("admin_user_repo")  # type: ignore[return-value]
+
+    @property
+    def memory(self) -> MemoryServiceProtocol:
         return self._get_or_build("memory")  # type: ignore[return-value]
 
     @property
-    def user_memory(self) -> UserMemoryService:
+    def user_memory(self) -> UserMemoryServiceProtocol:
         return self._get_or_build("user_memory")  # type: ignore[return-value]
 
     @property
@@ -520,7 +502,7 @@ class Container:
 
 
 def build_container() -> Container:
-    """Build the default Container with EnvConfigProvider + SystemClock + BridgeLogSink.
+    """Build the default Container with SQLite-backed repositories.
 
     This is the single entry point for constructing a production Container.
     Tests should construct Container directly and call ``override()`` with

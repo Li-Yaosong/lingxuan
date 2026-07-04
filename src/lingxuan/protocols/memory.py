@@ -1,8 +1,8 @@
-"""Phase 1 memory service protocol stubs.
+"""Memory service protocol interfaces.
 
-Minimal surfaces needed by DialogueService and ObservationService.
-The actual implementations wrap the old MVP modules until Phase 2
-migrates to Repository-based implementations.
+Defines the surfaces needed by DialogueService and ObservationService.
+Phase 2 (P2-10): methods are now async since the implementations
+(SqlSessionRepository-backed) perform DB IO.
 """
 
 from __future__ import annotations
@@ -14,11 +14,10 @@ from lingxuan.protocols.repositories import StoredMessage
 
 
 class MemoryService(Protocol):
-    """Session memory service protocol — Phase 1 placeholder interface.
+    """Session memory service protocol.
 
     Minimal surface needed by core services.  The actual implementation
-    lives in adapters (wrapping the old MVP memory module until Phase 2
-    migrates to SessionRepository).
+    lives in ``core/memory.py`` backed by SessionRepository.
     """
 
     async def append_message(
@@ -37,13 +36,15 @@ class MemoryService(Protocol):
 
 
 class UserMemoryService(Protocol):
-    """User memory service protocol — Phase 1 placeholder interface.
+    """User memory service protocol.
 
-    Minimal surface needed by core services.  The actual implementation
-    wraps the old MVP user_memory module until Phase 2.
+    Phase 2: methods are async since the DB-backed implementation
+    performs IO.  ``schedule_*`` methods are fire-and-forget (they
+    create internal asyncio tasks) but are still async to allow
+    the initial setup to complete before returning.
     """
 
-    def on_user_message(
+    async def on_user_message(
         self,
         user_id: int,
         text: str,
@@ -53,14 +54,14 @@ class UserMemoryService(Protocol):
         session_id: SessionId | None = None,
     ) -> None: ...
 
-    def schedule_cognition_refine(
+    async def schedule_cognition_refine(
         self,
         user_id: int,
         *,
         recent_exchange: str = "",
     ) -> None: ...
 
-    def schedule_memory_extract(
+    async def schedule_memory_extract(
         self,
         user_id: int,
         text: str,

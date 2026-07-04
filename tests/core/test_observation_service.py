@@ -61,13 +61,13 @@ class _FakeUserMemoryService:
     def __init__(self) -> None:
         self.cognition_calls: list[int] = []
 
-    def on_user_message(self, user_id: int, text: str, *, nickname: str = "", is_private: bool = False, session_id: SessionId | None = None) -> None:
+    async def on_user_message(self, user_id: int, text: str, *, nickname: str = "", is_private: bool = False, session_id: SessionId | None = None) -> None:
         pass
 
-    def schedule_cognition_refine(self, user_id: int, *, recent_exchange: str = "") -> None:
+    async def schedule_cognition_refine(self, user_id: int, *, recent_exchange: str = "") -> None:
         self.cognition_calls.append(user_id)
 
-    def schedule_memory_extract(self, user_id: int, text: str, *, nickname: str = "", group_id: int | None = None, context_lines: list[str] | None = None) -> None:
+    async def schedule_memory_extract(self, user_id: int, text: str, *, nickname: str = "", group_id: int | None = None, context_lines: list[str] | None = None) -> None:
         pass
 
 
