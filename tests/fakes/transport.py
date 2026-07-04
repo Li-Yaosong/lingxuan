@@ -15,8 +15,9 @@ from lingxuan.protocols.messaging import (
 class FakeTransport:
     """Implements MessageTransport protocol with recording and injection."""
 
-    def __init__(self, self_id: int = 0) -> None:
+    def __init__(self, self_id: int = 0, connected: bool = True) -> None:
         self._self_id = self_id
+        self._connected = connected
         self._handler: InboundHandler | None = None
         self.sent_messages: list[OutboundMessage] = []
         self.sent_stream_chunks: list[list[OutboundChunk]] = []
@@ -41,6 +42,9 @@ class FakeTransport:
 
     async def resolve_self_id(self) -> int:
         return self._self_id
+
+    def is_connected(self) -> bool:
+        return self._connected
 
     async def inject(self, msg: InboundMessage) -> None:
         """Test helper: simulate an inbound message arriving."""

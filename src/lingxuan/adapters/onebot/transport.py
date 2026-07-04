@@ -189,6 +189,10 @@ class OneBotTransport:
             return MessageSegment.at(chunk.at_user_id) + f" {chunk.text}"
         return chunk.text
 
+    def is_connected(self) -> bool:
+        """Return True if at least one bot is connected via NoneBot."""
+        return bool(nonebot.get_bots())
+
     def _current_bot(self) -> Bot:
         """Get the current Bot instance from nonebot.
 

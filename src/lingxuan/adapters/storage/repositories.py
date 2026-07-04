@@ -212,6 +212,28 @@ class SqlSessionRepository:
             return result.scalar_one()
 
     # ------------------------------------------------------------------
+    # count_sessions
+    # ------------------------------------------------------------------
+
+    async def count_sessions(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(SessionRow)
+            )
+            return result.scalar_one()
+
+    # ------------------------------------------------------------------
+    # count_total_messages
+    # ------------------------------------------------------------------
+
+    async def count_total_messages(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(SessionMessageRow)
+            )
+            return result.scalar_one()
+
+    # ------------------------------------------------------------------
     # trim_to_last
     # ------------------------------------------------------------------
 
@@ -473,6 +495,17 @@ class SqlSocialGraphRepository:
                 select(NameIndexRow.name, NameIndexRow.user_id)
             )
             return {name: uid for name, uid in result.all()}
+
+    # ------------------------------------------------------------------
+    # count_edges
+    # ------------------------------------------------------------------
+
+    async def count_edges(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(SocialEdgeRow)
+            )
+            return result.scalar_one()
 
     # ------------------------------------------------------------------
     # clear
@@ -742,6 +775,30 @@ class SqlUserProfileRepository:
                 select(UserProfileRow.user_id)
             )
             return [uid for (uid,) in result.all()]
+
+    # ------------------------------------------------------------------
+    # count_users
+    # ------------------------------------------------------------------
+
+    async def count_users(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(UserProfileRow)
+            )
+            return result.scalar_one()
+
+    # ------------------------------------------------------------------
+    # count_active_facts
+    # ------------------------------------------------------------------
+
+    async def count_active_facts(self) -> int:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(func.count()).select_from(UserFactRow).where(
+                    UserFactRow.active.is_(True)
+                )
+            )
+            return result.scalar_one()
 
     # ------------------------------------------------------------------
     # delete

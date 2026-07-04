@@ -39,3 +39,39 @@ class ConfigUpdateResponse(BaseModel):
     """Response for PUT /config."""
 
     results: list[ConfigUpdateResultItem]
+
+
+# ---------------------------------------------------------------------------
+# Status schemas
+# ---------------------------------------------------------------------------
+
+
+class MemoryStatsResponse(BaseModel):
+    sessions: int
+    messages: int
+    users: int
+    active_facts: int
+    edges: int
+
+
+class GroupObserveStateResponse(BaseModel):
+    group_id: int
+    buffer_len: int
+    last_judge_result: str = ""
+    in_cooldown: bool = False
+    cooldown_remaining: float = 0.0
+    observe_in_flight: bool = False
+
+
+class StatusResponse(BaseModel):
+    bot_online: bool
+    features: dict[str, bool]
+    model: str
+    memory_stats: MemoryStatsResponse
+    observe_states: list[GroupObserveStateResponse] = Field(default_factory=list)
+
+
+class LLMCheckResponse(BaseModel):
+    ok: bool
+    latency_ms: float = 0.0
+    error: str | None = None

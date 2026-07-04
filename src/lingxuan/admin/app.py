@@ -69,9 +69,11 @@ def create_admin_app(container: Container) -> FastAPI:
     # ── Route aggregation ────────────────────────────────────────────────
     from lingxuan.admin.routes import auth as auth_routes
     from lingxuan.admin.routes import config as config_routes
+    from lingxuan.admin.routes import status as status_routes
 
     app.include_router(auth_routes.router, prefix="/admin/api")
     app.include_router(config_routes.router, prefix="/admin/api")
+    app.include_router(status_routes.router, prefix="/admin/api")
 
     # ── SPA static files ─────────────────────────────────────────────────
     _mount_spa(app, container)

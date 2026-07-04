@@ -70,6 +70,12 @@ class InMemorySessionRepository:
     async def count_messages(self, sid: SessionId) -> int:
         return len(self._messages.get(sid.as_str(), []))
 
+    async def count_sessions(self) -> int:
+        return len(self._sessions)
+
+    async def count_total_messages(self) -> int:
+        return sum(len(msgs) for msgs in self._messages.values())
+
     async def trim_to_last(self, sid: SessionId, *, keep_last: int) -> int:
         key = sid.as_str()
         msgs = self._messages.get(key, [])
@@ -186,6 +192,12 @@ class InMemoryUserProfileRepository:
     async def list_user_ids(self) -> list[int]:
         return list(self._profiles.keys())
 
+    async def count_users(self) -> int:
+        return len(self._profiles)
+
+    async def count_active_facts(self) -> int:
+        return sum(len([f for f in p.facts if f.active]) for p in self._profiles.values())
+
     async def delete(self, user_id: int) -> bool:
         return self._profiles.pop(user_id, None) is not None
 
@@ -226,6 +238,9 @@ class InMemorySocialGraphRepository:
 
     async def all_names(self) -> dict[str, int]:
         return dict(self._name_index)
+
+    async def count_edges(self) -> int:
+        return len(self._edges)
 
     async def clear(self) -> None:
         self._edges.clear()

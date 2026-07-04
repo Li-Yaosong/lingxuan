@@ -15,7 +15,9 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from lingxuan.admin.auth import InvalidTokenError, decode_token
 from lingxuan.protocols.config import ConfigProvider
+from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
+from lingxuan.protocols.messaging import MessageTransport
 from lingxuan.protocols.repositories import (
     AdminUserRepository,
     AuditRepository,
@@ -86,6 +88,22 @@ def _get_admin_user_repo() -> AdminUserRepository:
     return get_container().admin_user_repo
 
 
+def _get_transport() -> MessageTransport:
+    return get_container().transport
+
+
+def _get_llm() -> LLMProvider:
+    return get_container().llm
+
+
+def _get_observation_store() -> object:
+    return get_container().observation_store
+
+
+def _get_stats_service() -> object:
+    return get_container().stats_service
+
+
 # Annotated aliases — use these in route handlers
 ConfigDep = Annotated[ConfigProvider, Depends(_get_config)]
 LogDep = Annotated[LogSink, Depends(_get_log)]
@@ -96,6 +114,10 @@ ConfigRepoDep = Annotated[ConfigRepository, Depends(_get_config_repo)]
 AuditRepoDep = Annotated[AuditRepository, Depends(_get_audit_repo)]
 PluginConfigRepoDep = Annotated[PluginConfigRepository, Depends(_get_plugin_config_repo)]
 AdminUserRepoDep = Annotated[AdminUserRepository, Depends(_get_admin_user_repo)]
+TransportDep = Annotated[MessageTransport, Depends(_get_transport)]
+LLMDep = Annotated[LLMProvider, Depends(_get_llm)]
+ObservationStoreDep = Annotated[Any, Depends(_get_observation_store)]
+StatsServiceDep = Annotated[Any, Depends(_get_stats_service)]
 
 
 # ── auth dependencies ────────────────────────────────────────────────────

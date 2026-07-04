@@ -36,6 +36,7 @@ from lingxuan.core.observation_state import ObservationStore
 from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
+from lingxuan.core.stats import StatsService
 from lingxuan.core.user_memory import UserMemoryService
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
@@ -393,6 +394,13 @@ class Container:
             group_executor=self.group_executor,
         )
 
+    def _build_stats_service(self) -> StatsService:
+        return StatsService(
+            sessions=self.session_repo,
+            users=self.user_profile_repo,
+            graph=self.social_graph_repo,
+        )
+
     # ── public properties (lazy singletons) ───────────────────────────────
 
     @property
@@ -498,6 +506,10 @@ class Container:
     @property
     def dialogue(self) -> "DialogueService":
         return self._get_or_build("dialogue")  # type: ignore[return-value]
+
+    @property
+    def stats_service(self) -> StatsService:
+        return self._get_or_build("stats_service")  # type: ignore[return-value]
 
 
 def build_container() -> Container:
