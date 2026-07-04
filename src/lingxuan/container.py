@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from lingxuan.adapters.clock import SystemClock
 from lingxuan.adapters.config_provider import EnvConfigProvider
-from lingxuan.adapters.logging.sink import BridgeLogSink
+from lingxuan.adapters.logging.sink import RingBufferLogSink
 from lingxuan.adapters.onebot.transport import OneBotTransport
 from lingxuan.adapters.openai.provider import OpenAIProvider
 from lingxuan.adapters.storage.db import Database
@@ -253,8 +253,8 @@ class Container:
     def _build_clock(self) -> SystemClock:
         return SystemClock()
 
-    def _build_log(self) -> BridgeLogSink:
-        return BridgeLogSink()
+    def _build_log(self) -> RingBufferLogSink:
+        return RingBufferLogSink()
 
     def _build_db(self) -> Database:
         return Database(self.config.get_str("DB_URL"))
