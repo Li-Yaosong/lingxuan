@@ -27,6 +27,10 @@ napcat/
 *.swp
 *.swo
 
+# Node.js / frontend
+node_modules/
+*.tsbuildinfo
+
 # OS
 .DS_Store
 Thumbs.db

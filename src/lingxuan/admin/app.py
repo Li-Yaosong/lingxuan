@@ -116,12 +116,13 @@ def _cors_origins(container: Container) -> list[str]:
 def _mount_spa(app: FastAPI, container: Container) -> None:
     """Mount the SPA static build directory at ``/admin`` if it exists.
 
-    Looks for ``web/dist/`` relative to the configured ``DATA_ROOT``.
-    When present, ``StaticFiles`` serves the build and a catch-all
-    fallback serves ``index.html`` for client-side routing.
+    Looks for ``admin/web/dist/`` relative to the lingxuan package source
+    directory.  When present, ``StaticFiles`` serves the build and a
+    catch-all fallback serves ``index.html`` for client-side routing.
     """
-    data_root = container.config.get_str("DATA_ROOT")
-    spa_dir = Path(data_root).parent / "web" / "dist"
+    # Resolve relative to this file: admin/web/dist inside the lingxuan package
+    pkg_dir = Path(__file__).resolve().parent  # src/lingxuan/admin/
+    spa_dir = pkg_dir / "web" / "dist"
     if not spa_dir.is_dir():
         return
 
