@@ -167,6 +167,64 @@ export interface MessageResponse {
   message: string;
 }
 
+// ── Config types ────────────────────────────────────────────────────────
+
+export interface ConfigSchemaItem {
+  key: string;
+  type: "str" | "int" | "float" | "bool" | "int_list";
+  default: unknown;
+  group: string;
+  is_secret: boolean;
+  hot_reloadable: boolean;
+  description: string;
+}
+
+export interface ConfigUpdateResultItem {
+  key: string;
+  success: boolean;
+  error: string | null;
+  needs_restart: boolean;
+}
+
+export interface ConfigUpdateResponse {
+  results: ConfigUpdateResultItem[];
+}
+
+// ── Status types ────────────────────────────────────────────────────────
+
+export interface MemoryStats {
+  sessions: number;
+  messages: number;
+  users: number;
+  active_facts: number;
+  edges: number;
+}
+
+export interface GroupObserveState {
+  group_id: number;
+  buffer_len: number;
+  last_judge_result: string;
+  in_cooldown: boolean;
+  cooldown_remaining: number;
+  observe_in_flight: boolean;
+}
+
+export interface StatusResponse {
+  bot_online: boolean;
+  features: Record<string, boolean>;
+  model: string;
+  memory_stats: MemoryStats;
+  observe_states: GroupObserveState[];
+}
+
+export interface LLMCheckResponse {
+  ok: boolean;
+  latency_ms: number;
+  error: string | null;
+}
+
+// ── Typed API calls ──────────────────────────────────────────────────────
+
 export const authApi = {
   login: (username: string, password: string) =>
     api.post<TokenResponse>("/admin/api/auth/login", { username, password }),
@@ -194,4 +252,23 @@ export const authApi = {
     }),
 
   me: () => api.get<MeResponse>("/admin/api/auth/me"),
+};
+
+export const configApi = {
+  schema: () =>
+    api.get<ConfigSchemaItem[]>("/admin/api/config/schema"),
+
+  get: () =>
+    api.get<Record<string, unknown>>("/admin/api/config"),
+
+  update: (changes: Record<string, unknown>) =>
+    api.put<ConfigUpdateResponse>("/admin/api/config", changes),
+};
+
+export const statusApi = {
+  get: () =>
+    api.get<StatusResponse>("/admin/api/status"),
+
+  llmCheck: () =>
+    api.post<LLMCheckResponse>("/admin/api/status/llm-check"),
 };
