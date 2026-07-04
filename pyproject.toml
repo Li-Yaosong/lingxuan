@@ -20,7 +20,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff", "mypy"]
 
 [project.scripts]
-lingxuan = "lingxuan.bootstrap:main"
+lingxuan = "lingxuan.cli:main"
 lingxuan-legacy = "lingxuan.bot:main"
 
 [build-system]
