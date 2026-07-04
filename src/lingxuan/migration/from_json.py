@@ -48,10 +48,17 @@ from lingxuan.protocols.messaging import SessionId
 
 @dataclass
 class DomainCount:
-    """Per-domain migration counters."""
+    """Per-domain migration counters.
+
+    ``inserted`` counts rows that were newly created (not previously existing).
+    ``updated`` counts rows that matched an existing PK/unique key and were
+    updated in place.  ``inserted + updated`` equals the total rows affected
+    by upsert statements.
+    """
 
     scanned: int = 0
     inserted: int = 0
+    updated: int = 0
     skipped: int = 0
     skipped_reasons: list[str] = field(default_factory=list)
 
@@ -95,6 +102,7 @@ def _dc_to_dict(dc: DomainCount) -> dict[str, Any]:
     return {
         "scanned": dc.scanned,
         "inserted": dc.inserted,
+        "updated": dc.updated,
         "skipped": dc.skipped,
         "skipped_reasons": dc.skipped_reasons,
     }
@@ -201,6 +209,23 @@ async def migrate_from_json(
         report.elapsed_seconds = time.monotonic() - t0
         return report
 
+    # Snapshot row counts before migration so we can distinguish
+    # truly new rows (inserted) from updated existing rows.
+    pre_counts: dict[str, int] = {}
+    if not dry_run:
+        async with db.session() as s:
+            for name, orm_cls in [
+                ("sessions", SessionRow),
+                ("messages", SessionMessageRow),
+                ("entities", SessionEntityRow),
+                ("user_profiles", UserProfileRow),
+                ("user_facts", UserFactRow),
+                ("social_edges", SocialEdgeRow),
+                ("name_index", NameIndexRow),
+            ]:
+                cnt = await s.scalar(select(func.count()).select_from(orm_cls))
+                pre_counts[name] = cnt or 0
+
     # ── Phase 1: sessions → messages → entities ─────────────────────────
     await _migrate_sessions(source, db, report, dry_run=dry_run)
 
@@ -209,6 +234,25 @@ async def migrate_from_json(
 
     # ── Phase 3: social_edges → name_index ──────────────────────────────
     await _migrate_social_graph(source, db, report, dry_run=dry_run)
+
+    # Compute true inserted vs updated from actual row-count delta
+    if not dry_run:
+        async with db.session() as s:
+            for name, orm_cls, dc in [
+                ("sessions", SessionRow, report.sessions),
+                ("messages", SessionMessageRow, report.messages),
+                ("entities", SessionEntityRow, report.entities),
+                ("user_profiles", UserProfileRow, report.user_profiles),
+                ("user_facts", UserFactRow, report.user_facts),
+                ("social_edges", SocialEdgeRow, report.social_edges),
+                ("name_index", NameIndexRow, report.name_index),
+            ]:
+                post_cnt = await s.scalar(select(func.count()).select_from(orm_cls))
+                new_rows = (post_cnt or 0) - pre_counts.get(name, 0)
+                # "inserted" from upsert rowcount = new + updated;
+                # actual new rows = post - pre
+                dc.updated = max(0, dc.inserted - new_rows)
+                dc.inserted = max(0, new_rows)
 
     report.elapsed_seconds = time.monotonic() - t0
     return report

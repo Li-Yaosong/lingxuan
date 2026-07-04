@@ -221,9 +221,19 @@ def _cmd_backup(args: argparse.Namespace) -> None:
     out_dir = Path(args.out) if args.out else None
     manifest = create_backup(db_url, Path(data_root), out_dir)
 
+    # Derive the backup path from the manifest's directory
     actual_out = out_dir or (Path(data_root) / "backups")
-    dirs = sorted(actual_out.iterdir()) if actual_out.exists() else []
-    backup_path = dirs[-1] if dirs else actual_out / "unknown"
+    # The backup dir is the most recently created under actual_out
+    if manifest.get("files"):
+        # The manifest was written inside the backup dir — find it
+        dirs = sorted(
+            d for d in actual_out.iterdir()
+            if d.is_dir() and (d / "manifest.json").exists()
+        ) if actual_out.exists() else []
+        backup_path = dirs[-1] if dirs else actual_out / "unknown"
+    else:
+        backup_path = actual_out / "unknown"
+
     print(f"✓ 备份完成: {backup_path}")
     print(f"  数据库大小: {manifest['db_size']} bytes")
     print(f"  包含 memory.zip: {'是' if manifest.get('includes_memory_zip') else '否'}")
@@ -233,7 +243,7 @@ def _cmd_restore(args: argparse.Namespace) -> None:
     """Restore the database from a backup snapshot."""
     from pathlib import Path
 
-    from lingxuan.migration.backup import restore_backup
+    from lingxuan.migration.backup import DBLockError, restore_backup
 
     db_url, data_root = _resolve_config_paths(args)
     backup_dir = Path(args.from_dir)
@@ -266,6 +276,9 @@ def _cmd_restore(args: argparse.Namespace) -> None:
     except (FileNotFoundError, ValueError) as e:
         print(f"✗ 恢复失败: {e}", file=sys.stderr)
         sys.exit(1)
+    except DBLockError as e:
+        print(f"✗ 恢复失败: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _cmd_migrate_memory(args: argparse.Namespace) -> None:
@@ -277,16 +290,15 @@ def _cmd_migrate_memory(args: argparse.Namespace) -> None:
     from lingxuan.adapters.storage.db import Database
     from lingxuan.migration.from_json import migrate_from_json
 
+    # Resolve config via shared helper (respects --data-root / --db-url)
+    db_url, data_root = _resolve_config_paths(args)
+    os.environ["DB_URL"] = db_url
+
     # Resolve source directory
     source = args.source
     if source is None:
-        data_root = os.environ.get("DATA_ROOT", "./data")
         source = os.path.join(data_root, "memory")
     source_path = Path(source)
-
-    # Resolve DB URL — reuse the same logic as db upgrade
-    db_url = args.db_url or os.environ.get("DB_URL", "sqlite+aiosqlite:///data/lingxuan.db")
-    os.environ["DB_URL"] = db_url
 
     # Ensure schema first
     db = Database(db_url)
@@ -303,18 +315,18 @@ def _cmd_migrate_memory(args: argparse.Namespace) -> None:
             # Print summary
             r = report
             mode = "DRY-RUN" if r.dry_run else "MIGRATED"
-            print(f"\n{'='*50}")
+            print(f"\n{'='*55}")
             print(f"  JSON→DB Migration Report  [{mode}]")
-            print(f"{'='*50}")
+            print(f"{'='*55}")
             print(f"  Source:       {r.source}")
             print(f"  Elapsed:      {r.elapsed_seconds:.2f}s")
-            print(f"  Sessions:     {r.sessions.scanned} scanned, {r.sessions.inserted} inserted, {r.sessions.skipped} skipped")
-            print(f"  Messages:     {r.messages.scanned} scanned, {r.messages.inserted} inserted, {r.messages.skipped} skipped")
-            print(f"  Entities:     {r.entities.scanned} scanned, {r.entities.inserted} inserted, {r.entities.skipped} skipped")
-            print(f"  Profiles:     {r.user_profiles.scanned} scanned, {r.user_profiles.inserted} inserted, {r.user_profiles.skipped} skipped")
-            print(f"  Facts:        {r.user_facts.scanned} scanned, {r.user_facts.inserted} inserted, {r.user_facts.skipped} skipped")
-            print(f"  Social edges: {r.social_edges.scanned} scanned, {r.social_edges.inserted} inserted, {r.social_edges.skipped} skipped")
-            print(f"  Name index:   {r.name_index.scanned} scanned, {r.name_index.inserted} inserted, {r.name_index.skipped} skipped")
+            print(f"  Sessions:     {r.sessions.scanned} scanned, {r.sessions.inserted} inserted, {r.sessions.updated} updated, {r.sessions.skipped} skipped")
+            print(f"  Messages:     {r.messages.scanned} scanned, {r.messages.inserted} inserted, {r.messages.updated} updated, {r.messages.skipped} skipped")
+            print(f"  Entities:     {r.entities.scanned} scanned, {r.entities.inserted} inserted, {r.entities.updated} updated, {r.entities.skipped} skipped")
+            print(f"  Profiles:     {r.user_profiles.scanned} scanned, {r.user_profiles.inserted} inserted, {r.user_profiles.updated} updated, {r.user_profiles.skipped} skipped")
+            print(f"  Facts:        {r.user_facts.scanned} scanned, {r.user_facts.inserted} inserted, {r.user_facts.updated} updated, {r.user_facts.skipped} skipped")
+            print(f"  Social edges: {r.social_edges.scanned} scanned, {r.social_edges.inserted} inserted, {r.social_edges.updated} updated, {r.social_edges.skipped} skipped")
+            print(f"  Name index:   {r.name_index.scanned} scanned, {r.name_index.inserted} inserted, {r.name_index.updated} updated, {r.name_index.skipped} skipped")
 
             if r.errors:
                 print(f"\n  Errors ({len(r.errors)}):")

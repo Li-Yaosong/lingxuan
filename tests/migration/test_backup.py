@@ -11,6 +11,8 @@ import pytest
 
 from lingxuan.migration.backup import (
     MANIFEST_FILENAME,
+    DBLockError,
+    _atomic_replace_file,
     _db_path_from_url,
     _read_manifest,
     create_backup,
@@ -348,3 +350,107 @@ class TestManifestContent:
         actual_size = (backup_dir / "lingxuan.db").stat().st_size
 
         assert manifest["db_size"] == actual_size
+
+
+# ---------------------------------------------------------------------------
+# Atomic file replacement
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicReplaceFile:
+    def test_replaces_dest_atomically(self, tmp_path: Path) -> None:
+        """_atomic_replace_file replaces dest with src content."""
+        src = tmp_path / "source.db"
+        src.write_bytes(b"hello world", )
+
+        dest = tmp_path / "dest.db"
+        dest.write_bytes(b"old content")
+
+        _atomic_replace_file(src, dest)
+        assert dest.read_bytes() == b"hello world"
+
+    def test_cleans_up_temp_on_failure(self, tmp_path: Path) -> None:
+        """If copy fails, no temp file is left behind."""
+        src = tmp_path / "nonexistent"
+        dest = tmp_path / "dest.db"
+        dest.write_bytes(b"old")
+
+        with pytest.raises(FileNotFoundError):
+            _atomic_replace_file(src, dest)
+
+        # dest should still have old content (os.replace never ran)
+        assert dest.read_bytes() == b"old"
+        # No temp files left
+        temp_files = list(tmp_path.glob(".lingxuan_restore_*"))
+        assert len(temp_files) == 0
+
+
+# ---------------------------------------------------------------------------
+# Exclusive lock check
+# ---------------------------------------------------------------------------
+
+
+class TestExclusiveLock:
+    def test_restore_fails_when_db_locked(
+        self, tmp_db_url: str, tmp_db: Path, data_root: Path
+    ) -> None:
+        """restore_backup raises DBLockError when another connection holds a lock."""
+        # Create a backup first
+        create_backup(tmp_db_url, data_root)
+        backups_dir = data_root / "backups"
+        backup_dir = list(backups_dir.iterdir())[0]
+
+        # Hold an exclusive lock on the DB from another connection
+        lock_conn = sqlite3.connect(str(tmp_db))
+        lock_conn.execute("PRAGMA journal_mode=WAL")
+        lock_conn.execute("BEGIN EXCLUSIVE")
+
+        try:
+            with pytest.raises(DBLockError, match="无法获取数据库独占锁"):
+                restore_backup(backup_dir, tmp_db_url, data_root)
+        finally:
+            lock_conn.close()
+
+    def test_restore_succeeds_when_db_unlocked(
+        self, tmp_db_url: str, tmp_db: Path, data_root: Path
+    ) -> None:
+        """restore_backup succeeds when no other connection holds a lock."""
+        create_backup(tmp_db_url, data_root)
+        backups_dir = data_root / "backups"
+        backup_dir = list(backups_dir.iterdir())[0]
+
+        # Should not raise
+        restore_backup(backup_dir, tmp_db_url, data_root)
+
+
+# ---------------------------------------------------------------------------
+# Auto-snapshot failure aborts restore
+# ---------------------------------------------------------------------------
+
+
+class TestAutoSnapshotFailure:
+    def test_auto_snapshot_failure_aborts_restore(
+        self, tmp_db_url: str, tmp_db: Path, data_root: Path
+    ) -> None:
+        """If auto-snapshot fails, restore is aborted (not silently continued)."""
+        create_backup(tmp_db_url, data_root)
+        backups_dir = data_root / "backups"
+        backup_dir = list(backups_dir.iterdir())[0]
+
+        # Modify DB so we can tell if restore happened
+        conn = sqlite3.connect(str(tmp_db))
+        conn.execute("INSERT INTO t (id, name) VALUES (99, 'pre_restore')")
+        conn.commit()
+        conn.close()
+
+        # Patch create_backup to fail during auto-snapshot
+        from unittest.mock import patch
+        with patch("lingxuan.migration.backup.create_backup", side_effect=RuntimeError("disk full")):
+            with pytest.raises(RuntimeError, match="disk full"):
+                restore_backup(backup_dir, tmp_db_url, data_root)
+
+        # Verify DB was NOT restored (still has the pre_restore row)
+        conn = sqlite3.connect(str(tmp_db))
+        rows = conn.execute("SELECT name FROM t WHERE id = 99").fetchall()
+        conn.close()
+        assert len(rows) == 1  # Restore did not happen

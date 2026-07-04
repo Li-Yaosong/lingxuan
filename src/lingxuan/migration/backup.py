@@ -23,8 +23,10 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import sqlite3
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -33,6 +35,10 @@ from zipfile import ZIP_DEFLATED, ZipFile
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "manifest.json"
+
+
+class DBLockError(Exception):
+    """Raised when the database cannot be exclusively locked for restore."""
 
 
 # ---------------------------------------------------------------------------
@@ -72,6 +78,52 @@ def _db_path_from_url(db_url: str) -> Path:
 def _sync_db_url(db_url: str) -> str:
     """Convert async aiosqlite URL to sync sqlite URL."""
     return db_url.replace("sqlite+aiosqlite:///", "sqlite:///")
+
+
+def _acquire_exclusive_lock(db_path: Path) -> sqlite3.Connection:
+    """Try to acquire an exclusive lock on the database file.
+
+    Opens the DB in WAL mode and attempts ``BEGIN EXCLUSIVE``.  If another
+    process holds a lock, this raises :class:`DBLockError` within 2 seconds.
+
+    Returns the connection holding the lock — the caller **must** close it
+    when done (typically after the restore file copy completes).
+    """
+    if not db_path.exists():
+        # No DB file means no competing process
+        return None  # type: ignore[return-value]
+
+    conn = sqlite3.connect(str(db_path), timeout=2)
+    conn.execute("PRAGMA journal_mode=WAL")
+    try:
+        conn.execute("BEGIN EXCLUSIVE")
+    except sqlite3.OperationalError as exc:
+        conn.close()
+        raise DBLockError(
+            f"无法获取数据库独占锁 ({db_path})，请确保灵轩进程已停止: {exc}"
+        ) from exc
+    return conn
+
+
+def _atomic_replace_file(src: Path, dest: Path) -> None:
+    """Replace *dest* with *src* atomically via temp-file + os.replace().
+
+    On POSIX, ``os.replace()`` is atomic, so a crash mid-write cannot leave
+    a partially-written database file.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Write to a temp file next to the destination first
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=str(dest.parent), prefix=".lingxuan_restore_",
+    )
+    try:
+        os.close(tmp_fd)
+        shutil.copy2(src, tmp_path)
+        os.replace(tmp_path, dest)
+    except BaseException:
+        # Clean up the temp file on any failure
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
 
 
 def _timestamp_dir() -> str:
@@ -250,10 +302,22 @@ def restore_backup(
     *,
     auto_snapshot: bool = True,
     restore_memory: bool = True,
+    skip_lock_check: bool = False,
 ) -> dict:
     """Restore the database (and optionally source JSON) from a backup snapshot.
 
     **Destructive operation** — overwrites the current database file.
+
+    Safety measures:
+      1. Acquires an exclusive lock on the current DB to ensure no other
+         process is actively writing (raises :class:`DBLockError` on failure).
+         Set *skip_lock_check* to True when called from the same process
+         (e.g. auto-migrate rollback) where the lock check would self-deadlock.
+      2. Auto-snapshots the current state before overwriting.  If the
+         auto-snapshot fails, the restore is **aborted** (not silently
+         continued) to preserve a recovery path.
+      3. Uses atomic file replacement (temp-file + ``os.replace``) so a crash
+         mid-write cannot leave a corrupted database.
 
     Args:
         backup_dir: Path to the backup snapshot directory (containing
@@ -264,6 +328,9 @@ def restore_backup(
             overwriting (safety net for accidental restore).
         restore_memory: If True and the backup contains ``memory.zip``,
             extract it into ``data_root/memory``.
+        skip_lock_check: If True, skip the exclusive-lock pre-check.  Use
+            only when the caller is the same process that holds the DB open
+            (e.g. auto-migrate rollback).
 
     Returns:
         The manifest dict of the restored backup.
@@ -271,6 +338,7 @@ def restore_backup(
     Raises:
         FileNotFoundError: If backup dir or its manifest is missing.
         ValueError: If the manifest is invalid or backup DB file is missing.
+        DBLockError: If another process holds a lock on the database.
     """
     # 1. Validate backup
     if not backup_dir.is_dir():
@@ -282,40 +350,53 @@ def restore_backup(
     if not backup_db.exists():
         raise ValueError(f"备份目录缺少 lingxuan.db: {backup_dir}")
 
-    # 2. Auto-snapshot current state before overwriting
-    if auto_snapshot:
-        current_db_path = _db_path_from_url(db_url)
-        if current_db_path.exists():
-            logger.info("恢复前自动快照当前数据库...")
-            try:
-                create_backup(db_url, data_root)
-            except Exception:
-                # Auto-snapshot is best-effort; don't block restore on failure
-                logger.warning("自动快照失败，继续恢复", exc_info=True)
-
-    # 3. Overwrite current DB
     current_db_path = _db_path_from_url(db_url)
-    logger.info("正在恢复数据库: %s → %s", backup_db, current_db_path)
 
-    # Remove WAL/SHM files if they exist (stale WAL can cause issues)
-    for suffix in ("-wal", "-shm"):
-        sidecar = current_db_path.with_suffix(current_db_path.suffix + suffix)
-        if sidecar.exists():
-            sidecar.unlink()
-            logger.debug("删除辅助文件: %s", sidecar)
+    # 2. Exclusive lock — ensure no other process is writing the DB
+    lock_conn: sqlite3.Connection | None = None
+    if not skip_lock_check and current_db_path.exists():
+        logger.info("恢复前获取数据库独占锁 ...")
+        lock_conn = _acquire_exclusive_lock(current_db_path)
 
-    current_db_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(backup_db, current_db_path)
-    logger.info("数据库已恢复")
+    try:
+        # 3. Auto-snapshot current state before overwriting
+        if auto_snapshot and current_db_path.exists():
+            logger.info("恢复前自动快照当前数据库...")
+            create_backup(db_url, data_root)
+            logger.info("自动快照完成")
 
-    # 4. Optionally restore memory.zip
-    if restore_memory:
-        memory_zip = backup_dir / "memory.zip"
-        if memory_zip.exists():
-            memory_dir = data_root / "memory"
-            logger.info("正在恢复 memory JSON → %s", memory_dir)
-            _unzip_memory(memory_zip, memory_dir)
-            logger.info("memory JSON 已恢复")
+        # 4. Overwrite current DB — atomic via temp-file + os.replace
+        logger.info("正在恢复数据库: %s → %s", backup_db, current_db_path)
 
-    logger.info("恢复完成 (来源: %s)", backup_dir)
+        # Remove WAL/SHM files if they exist (stale WAL can cause issues)
+        for suffix in ("-wal", "-shm"):
+            sidecar = current_db_path.with_suffix(current_db_path.suffix + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
+                logger.debug("删除辅助文件: %s", sidecar)
+
+        _atomic_replace_file(backup_db, current_db_path)
+        logger.info("数据库已恢复")
+
+        # 5. Optionally restore memory.zip
+        if restore_memory:
+            memory_zip = backup_dir / "memory.zip"
+            if memory_zip.exists():
+                memory_dir = data_root / "memory"
+                logger.info("正在恢复 memory JSON → %s", memory_dir)
+                _unzip_memory(memory_zip, memory_dir)
+                logger.info("memory JSON 已恢复")
+
+        logger.info("恢复完成 (来源: %s)", backup_dir)
+    except BaseException:
+        # Re-raise any error (auto-snapshot failure, file copy failure, etc.)
+        raise
+    finally:
+        # Release the exclusive lock regardless of outcome
+        if lock_conn is not None:
+            try:
+                lock_conn.close()
+            except Exception:
+                pass
+
     return manifest
