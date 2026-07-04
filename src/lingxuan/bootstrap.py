@@ -1,14 +1,19 @@
 """Bootstrap: process entry point replacing MVP bot.main().
 
 Wires the DI Container, initialises NoneBot with the OneBot adapter,
-registers lifecycle hooks, and starts the message transport.
+registers lifecycle hooks, starts the message transport, and launches
+the admin FastAPI sub-app on an independent port.
 
 Only this module (and adapters/onebot/*) may import nonebot.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 import nonebot
+import uvicorn
 
 from lingxuan.adapters.onebot.lifecycle import (
     init_nonebot,
@@ -16,6 +21,8 @@ from lingxuan.adapters.onebot.lifecycle import (
     run,
 )
 from lingxuan.container import Container, build_container
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_config(container: Container) -> list[str]:
@@ -78,8 +85,63 @@ async def _shutdown(container: Container) -> None:
     nonebot.logger.info("灵轩下线~")
 
 
+def _start_admin_server(container: Container, driver: nonebot.drivers.Driver) -> None:
+    """Create the admin FastAPI app and schedule its uvicorn server.
+
+    The admin server runs on an independent port (default 127.0.0.1:8081)
+    as an asyncio task within the same event loop as NoneBot.
+
+    Fallback: if running the admin on an independent port proves
+    problematic (e.g. event-loop integration issues), set the env var
+    ``ADMIN_SAME_PORT=1`` to mount the admin sub-app on NoneBot's
+    FastAPI driver instead.  The independent-port approach is the
+    default and preferred method.
+    """
+    import os
+
+    from lingxuan.admin.app import create_admin_app
+
+    admin_app = create_admin_app(container)
+    admin_host = container.config.get_str("ADMIN_HOST")
+    admin_port = container.config.get_int("ADMIN_PORT")
+
+    same_port = os.environ.get("ADMIN_SAME_PORT", "").strip() in ("1", "true", "yes")
+    if same_port:
+        # Fallback: mount on NoneBot's FastAPI app (same port)
+        from nonebot import get_app
+
+        nb_app = get_app()
+        nb_app.mount("/admin", admin_app)
+        logger.info("管理端已挂载于同端口 (ADMIN_SAME_PORT=1)")
+        return
+
+    config = uvicorn.Config(
+        app=admin_app,
+        host=admin_host,
+        port=admin_port,
+        log_level="info",
+        # Don't steal the signal handlers — NoneBot owns the lifecycle
+        handle_signals=False,
+    )
+    server = uvicorn.Server(config)
+
+    @driver.on_startup  # type: ignore[misc]
+    async def _launch_admin() -> None:
+        """Start the admin uvicorn server as a background asyncio task."""
+        asyncio.create_task(server.serve())
+        nonebot.logger.info(
+            "管理端已启动 → http://{}:{}", admin_host, admin_port
+        )
+
+    @driver.on_shutdown  # type: ignore[misc]
+    async def _shutdown_admin() -> None:
+        """Gracefully shut down the admin server."""
+        server.should_exit = True
+        nonebot.logger.info("管理端已关闭")
+
+
 def main() -> None:
-    """Process entry point: build container → init nonebot → register lifecycle → run."""
+    """Process entry point: build container → init nonebot → register lifecycle → start admin → run."""
     # 1. Build Container (set_global_config happens inside _build_config)
     container = build_container()
 
@@ -96,7 +158,10 @@ def main() -> None:
     # 4. Register inbound handler
     container.transport.start(container.dialogue.handle_inbound)
 
-    # 5. Run
+    # 5. Start admin FastAPI sub-app on independent port
+    _start_admin_server(container, driver)
+
+    # 6. Run
     run()
 
 
