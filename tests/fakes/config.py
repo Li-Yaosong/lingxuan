@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec
+from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, mask_secret
 
 
 class FakeConfigProvider:
@@ -53,7 +53,7 @@ class FakeConfigProvider:
             if mask_secrets:
                 spec = SETTINGS_BY_KEY.get(key)
                 if spec and spec.is_secret:
-                    result[key] = "***"
+                    result[key] = mask_secret(str(value))
                     continue
             result[key] = value
         return result

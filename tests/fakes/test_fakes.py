@@ -130,8 +130,9 @@ class TestFakeConfigProvider:
 
     async def test_get_all_masks_secrets(self, fake_config: FakeConfigProvider) -> None:
         result = await fake_config.get_all(mask_secrets=True)
-        assert result["OPENAI_API_KEY"] == "***"
-        assert result["SECRET_KEY"] == "***"
+        # Empty secret values show "(未配置)" per mask_secret()
+        assert result["OPENAI_API_KEY"] == "(未配置)"
+        assert result["SECRET_KEY"] == "(未配置)"
         assert result["BOT_NAME"] == "灵轩"
 
     async def test_get_all_no_mask(self, fake_config: FakeConfigProvider) -> None:
