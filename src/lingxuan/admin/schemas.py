@@ -33,6 +33,7 @@ class ConfigUpdateResultItem(BaseModel):
     success: bool
     error: str | None = None
     needs_restart: bool = False
+    value: object | None = None
 
 
 class ConfigUpdateResponse(BaseModel):

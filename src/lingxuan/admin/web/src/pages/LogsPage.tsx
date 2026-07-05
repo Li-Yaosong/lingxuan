@@ -3,15 +3,9 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { logsApi, type LogRecordItem } from "../api/client";
 import { useLogStream, type WsStatus } from "../hooks/useLogStream";
+import { clientFilter } from "../utils/logsFilter";
 
-// ── Level rank for client-side ≥ filtering (mirrors backend) ───────────────
-
-const LEVEL_RANK: Record<string, number> = {
-  DEBUG: 10,
-  INFO: 20,
-  WARNING: 30,
-  ERROR: 40,
-};
+// ── Level options for the UI ─────────────────────────────────────────────────
 
 const LEVEL_OPTIONS = ["", "DEBUG", "INFO", "WARNING", "ERROR"] as const;
 
@@ -22,31 +16,6 @@ const LEVEL_LABELS: Record<string, string> = {
   WARNING: "WARNING",
   ERROR: "ERROR",
 };
-
-// ── Client-side filter ─────────────────────────────────────────────────────
-
-function clientFilter(
-  records: LogRecordItem[],
-  level: string,
-  keyword: string,
-): LogRecordItem[] {
-  return records.filter((r) => {
-    if (level) {
-      const recRank = LEVEL_RANK[r.level] ?? 0;
-      const filterRank = LEVEL_RANK[level] ?? 0;
-      if (recRank < filterRank) return false;
-    }
-    if (keyword) {
-      const kw = keyword.toLowerCase();
-      if (
-        !r.msg.toLowerCase().includes(kw) &&
-        !r.logger.toLowerCase().includes(kw)
-      )
-        return false;
-    }
-    return true;
-  });
-}
 
 // ── Format timestamp for display ───────────────────────────────────────────
 

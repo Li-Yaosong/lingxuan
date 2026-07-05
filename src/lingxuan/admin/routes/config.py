@@ -76,6 +76,8 @@ async def update_config(
 
     Per-item validation and write; each item is committed independently
     (best-effort strategy: one failure does not block other items).
+    Type-validation failures return 422 for the whole request; all other
+    items are processed but only successful results are persisted.
     Audit is recorded once with the list of changed keys; sensitive values
     are never stored in audit detail.
     """
@@ -85,26 +87,35 @@ async def update_config(
     # Track secret keys so we mask them in audit detail
     secret_keys: set[str] = set()
 
+    # Pre-validate all types first; reject the whole request on type errors
+    type_errors: list[ConfigUpdateResultItem] = []
+    valid_updates: list[tuple[str, object, object]] = []  # (key, coerced, raw)
     for key, value in updates.items():
-        # 1. Key must exist in SETTINGS
         spec = SETTINGS_BY_KEY.get(key)
         if spec is None:
-            results.append(ConfigUpdateResultItem(
+            type_errors.append(ConfigUpdateResultItem(
                 key=key, success=False, error=f"Unknown config key: {key}",
             ))
             continue
-
-        # 2. Type coercion / validation
         try:
             coerced = _coerce_value(spec, value)
+            valid_updates.append((key, coerced, value))
         except (ValueError, TypeError) as exc:
-            results.append(ConfigUpdateResultItem(
+            type_errors.append(ConfigUpdateResultItem(
                 key=key, success=False,
                 error=f"Type validation failed: {exc}",
             ))
-            continue
 
-        # 3. Persist via ConfigProvider.set (writes DB + triggers subscribers)
+    if type_errors:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"type_errors": [r.model_dump() for r in type_errors]},
+        )
+
+    # All types valid — persist each item
+    for key, coerced, _raw in valid_updates:
+        spec = SETTINGS_BY_KEY[key]
+
         try:
             await config.set(key, coerced, actor=user["username"])
         except Exception as exc:
@@ -114,10 +125,15 @@ async def update_config(
             continue
 
         succeeded_keys.append(key)
+        # Echo masked value for secret items; raw for non-secret
+        display_value: str | None = None
+        if spec.is_secret:
+            display_value = mask_secret(str(coerced))
         results.append(ConfigUpdateResultItem(
             key=key,
             success=True,
             needs_restart=not spec.hot_reloadable,
+            value=display_value if spec.is_secret else coerced,
         ))
         if spec.is_secret:
             secret_keys.add(key)

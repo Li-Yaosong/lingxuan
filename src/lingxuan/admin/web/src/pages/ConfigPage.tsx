@@ -7,6 +7,7 @@ import {
   type ConfigSchemaItem,
   type ConfigUpdateResultItem,
 } from "../api/client";
+import { valueToString, coerceFormValue, maskDisplay } from "../utils/configForm";
 
 /** Human-readable group labels. */
 const GROUP_LABELS: Record<string, string> = {
@@ -361,46 +362,3 @@ function renderControl(
   );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────
-
-/** Convert a typed value to string for form binding. */
-function valueToString(val: unknown, type: ConfigSchemaItem["type"]): string {
-  if (val === undefined || val === null) return "";
-  if (type === "bool") return val ? "true" : "false";
-  if (type === "int_list") {
-    if (Array.isArray(val)) return val.join(", ");
-    return String(val);
-  }
-  return String(val);
-}
-
-/** Coerce a form string value back to the typed value for the API. */
-function coerceFormValue(raw: string, type: ConfigSchemaItem["type"]): unknown {
-  switch (type) {
-    case "str":
-      return raw;
-    case "int":
-      return parseInt(raw, 10);
-    case "float":
-      return parseFloat(raw);
-    case "bool":
-      return raw.toLowerCase() === "true";
-    case "int_list":
-      return raw
-        .split(/[,\s]+/)
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .map(Number);
-    default:
-      return raw;
-  }
-}
-
-/** Mask a value for display (secrets shown as masked placeholder in the form). */
-function maskDisplay(val: string): string {
-  // If the value looks like it's already a masked placeholder from the API
-  // (contains "****"), treat it as the display value but allow the user to
-  // clear it and type a new value.
-  if (val.includes("****")) return "";
-  return val;
-}

@@ -410,6 +410,23 @@ class TestRBAC:
         assert resp.status_code == 200
         assert resp.json()["role"] == "readonly"
 
+    def test_readonly_user_gets_403_on_admin_only_endpoint(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository
+    ) -> None:
+        """Readonly user accessing admin-only write endpoint returns 403."""
+        _create_admin(admin_repo, username="viewer", role="readonly")
+        login_resp = _login(client, username="viewer")
+        tokens = login_resp.json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        # PUT /config requires admin role
+        resp = client.put(
+            "/admin/api/config",
+            json={"BOT_NAME": "hacked"},
+            headers=headers,
+        )
+        assert resp.status_code == 403
+
 
 # ---------------------------------------------------------------------------
 # must_change_password enforcement
@@ -447,6 +464,23 @@ class TestMustChangePassword:
             "refresh_token": tokens["refresh_token"],
         }, headers=headers)
         assert resp.status_code == 200
+
+    def test_must_change_user_blocked_from_non_auth_endpoints(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository
+    ) -> None:
+        """User with must_change_password=True is blocked (428) from non-auth endpoints."""
+        _create_admin(admin_repo, must_change_password=True)
+        login_resp = _login(client)
+        tokens = login_resp.json()
+        headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+
+        # GET /config should return 428 (must change password first)
+        resp = client.get("/admin/api/config", headers=headers)
+        assert resp.status_code == 428
+
+        # GET /status should also return 428
+        resp = client.get("/admin/api/status", headers=headers)
+        assert resp.status_code == 428
 
 
 # ---------------------------------------------------------------------------

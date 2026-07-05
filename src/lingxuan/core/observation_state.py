@@ -89,6 +89,12 @@ class ObservationStore:
     def buffer_len(self, group_id: int) -> int:
         return len(self._buffers.get(group_id, []))
 
+    # ── public enumeration ────────────────────────────────────────────────
+
+    def active_group_ids(self) -> list[int]:
+        """Return IDs of groups that have buffered entries."""
+        return [gid for gid, buf in self._buffers.items() if buf]
+
     # ── observe progress ─────────────────────────────────────────────────
 
     def mark_observed(self, group_id: int) -> None:

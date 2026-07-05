@@ -76,7 +76,7 @@ async def get_status(
 
     # Observation states — per-group with active buffers
     observe_states: list[GroupObserveStateResponse] = []
-    for group_id in observation_store._buffers:
+    for group_id in observation_store.active_group_ids():
         state = observation_store.state(group_id)
         observe_states.append(GroupObserveStateResponse(
             group_id=group_id,

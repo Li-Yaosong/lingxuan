@@ -271,24 +271,48 @@ class TestPutConfig:
         )
         assert resp.status_code == 403
 
-    def test_unknown_key_returns_failure(
-        self, client: TestClient, admin_repo: InMemoryAdminUserRepository
+    def test_hot_reloadable_update_echoes_value(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
     ) -> None:
+        """Non-secret values are echoed in the PUT response."""
         _create_admin(admin_repo)
         tokens = _login(client)
         resp = client.put(
             "/admin/api/config",
-            json={"NONEXISTENT_KEY": "value"},
+            json={"BOT_NAME": "测试名"},
             headers=_auth_headers(tokens),
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["results"][0]["success"] is False
-        assert "Unknown" in data["results"][0]["error"]
+        result = data["results"][0]
+        assert result["success"] is True
+        assert result["value"] == "测试名"
+
+    def test_secret_update_echoes_masked_value(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
+    ) -> None:
+        """Secret values are echoed as masked in the PUT response."""
+        _create_admin(admin_repo)
+        tokens = _login(client)
+        resp = client.put(
+            "/admin/api/config",
+            json={"OPENAI_API_KEY": "sk-abcdef1234567890"},
+            headers=_auth_headers(tokens),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        result = data["results"][0]
+        assert result["success"] is True
+        # The value should be masked (contains "****")
+        masked = result["value"]
+        assert "****" in masked
+        # The plaintext should NOT appear
+        assert "sk-abcdef1234567890" not in str(masked)
 
     def test_type_validation_failure(
         self, client: TestClient, admin_repo: InMemoryAdminUserRepository
     ) -> None:
+        """Type validation errors return 422 (not 200 with per-item failure)."""
         _create_admin(admin_repo)
         tokens = _login(client)
         resp = client.put(
@@ -296,33 +320,60 @@ class TestPutConfig:
             json={"MEMORY_WINDOW": "not_a_number"},
             headers=_auth_headers(tokens),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 422
         data = resp.json()
-        assert data["results"][0]["success"] is False
-        assert "Type validation" in data["results"][0]["error"] or "validation" in data["results"][0]["error"].lower()
+        assert "type_errors" in data["detail"]
 
-    def test_batch_update_partial_failure(
-        self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
+    def test_unknown_key_still_returns_422(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository
     ) -> None:
+        """Unknown keys are also pre-validation errors returning 422."""
         _create_admin(admin_repo)
         tokens = _login(client)
         resp = client.put(
             "/admin/api/config",
-            json={"BOT_NAME": "新名字", "MEMORY_WINDOW": "not_a_number"},
+            json={"NONEXISTENT_KEY": "value"},
+            headers=_auth_headers(tokens),
+        )
+        assert resp.status_code == 422
+
+    def test_batch_update_partial_failure(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
+    ) -> None:
+        """When a batch contains both valid and unknown keys, 422 is returned
+        (type/unknown-key errors reject the whole request)."""
+        _create_admin(admin_repo)
+        tokens = _login(client)
+        resp = client.put(
+            "/admin/api/config",
+            json={"BOT_NAME": "新名字", "NONEXISTENT_KEY": "bad"},
+            headers=_auth_headers(tokens),
+        )
+        # Unknown key triggers 422 pre-validation failure
+        assert resp.status_code == 422
+        # Nothing should be persisted
+        assert config.get_str("BOT_NAME") == "灵轩"
+
+    def test_batch_all_valid_succeeds(
+        self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
+    ) -> None:
+        """When all items in a batch are valid, all are persisted."""
+        _create_admin(admin_repo)
+        tokens = _login(client)
+        resp = client.put(
+            "/admin/api/config",
+            json={"BOT_NAME": "新名字", "MEMORY_WINDOW": 30},
             headers=_auth_headers(tokens),
         )
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["results"]) == 2
-
         bot_result = next(r for r in data["results"] if r["key"] == "BOT_NAME")
         mem_result = next(r for r in data["results"] if r["key"] == "MEMORY_WINDOW")
-
         assert bot_result["success"] is True
-        assert mem_result["success"] is False
-
-        # BOT_NAME should be updated despite MEMORY_WINDOW failure
+        assert mem_result["success"] is True
         assert config.get_str("BOT_NAME") == "新名字"
+        assert config.get_int("MEMORY_WINDOW") == 30
 
     def test_bool_coercion(
         self, client: TestClient, admin_repo: InMemoryAdminUserRepository, config: FakeConfigProvider
