@@ -63,6 +63,9 @@ async def _startup(container: Container) -> None:
     # Initialize user memory service
     await container.user_memory.ensure_user_memory_initialized()
 
+    # Initialize plugins: wire services, bridge config changes, discover & register
+    await container.init_plugins()
+
     # Validate config
     issues = _validate_config(container)
 

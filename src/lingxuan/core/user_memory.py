@@ -26,6 +26,7 @@ from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import ChatMessage, LLMProvider
 from lingxuan.protocols.logging import LogSink, LogRecord
+from lingxuan.protocols.plugins import HookType, PluginContext, PluginHost
 from lingxuan.protocols.repositories import (
     SocialEdge,
     SocialGraphRepository,
@@ -101,6 +102,7 @@ class UserMemoryService:
         config: ConfigProvider,
         clock: Clock,
         log: LogSink,
+        plugin_host: PluginHost | None = None,
     ) -> None:
         self._profiles = profiles
         self._graph = graph
@@ -108,6 +110,7 @@ class UserMemoryService:
         self._config = config
         self._clock = clock
         self._log = log
+        self._plugin_host = plugin_host
 
         # Per-instance debounce state (replaces module-level globals)
         self._pending_extracts: dict[int, list[dict[str, Any]]] = {}
@@ -484,6 +487,26 @@ class UserMemoryService:
         except json.JSONDecodeError:
             self._emit("DEBUG", "llm_extract_parse_failed", uid=speaker_id)
             return
+
+        # Plugin hook: on_memory_extract — allow plugins to modify candidates
+        if self._plugin_host is not None:
+            extract_ctx = PluginContext(
+                hook=HookType.on_memory_extract,
+                extra={
+                    "facts": data.get("facts", []),
+                    "edges": data.get("edges", []),
+                    "impression_delta": data.get("impression_delta", ""),
+                    "speaker_id": speaker_id,
+                    "group_id": group_id,
+                },
+            )
+            extract_ctx = await self._plugin_host.dispatch(extract_ctx)
+            # Apply plugin modifications back
+            data = {
+                "facts": extract_ctx.extra.get("facts", []),
+                "edges": extract_ctx.extra.get("edges", []),
+                "impression_delta": extract_ctx.extra.get("impression_delta", ""),
+            }
 
         for item in data.get("facts", []):
             if not isinstance(item, dict):

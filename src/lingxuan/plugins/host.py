@@ -29,13 +29,22 @@ class PluginRecord:
 class DefaultPluginHost:
     """Concrete PluginHost with registry, subscription, enable/disable, and safe dispatch."""
 
-    def __init__(self, log: logging.Logger | None = None) -> None:
+    def __init__(self, *, log: logging.Logger | None = None, services: object = None) -> None:
         self._log = log or logger
+        self._services = services
         self._plugins: dict[str, PluginRecord] = {}
         self._subscriptions: dict[HookType, list[tuple[str, HookHandler]]] = {
             h: [] for h in HookType
         }
         self._setting_up: str | None = None
+
+    def set_services(self, services: object) -> None:
+        """Set the services object to be passed to plugin.setup().
+
+        Must be called before ``discover_and_register()`` so that
+        ``plugin.setup()`` receives a non-None services object.
+        """
+        self._services = services
 
     # ── registration ──────────────────────────────────────────────────────
 
@@ -54,7 +63,7 @@ class DefaultPluginHost:
         self._setting_up = name
 
         try:
-            plugin.setup(self, cfg, services=None)
+            plugin.setup(self, cfg, services=self._services)
         except Exception:
             # Roll back any subscriptions added during the failed setup
             for hook in HookType:

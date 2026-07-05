@@ -23,8 +23,10 @@ from lingxuan.protocols.memory import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     InboundMessage,
     ObservationEntry,
+    ReplyPlan,
     SessionId,
 )
+from lingxuan.protocols.plugins import HookType, PluginContext, PluginHost
 from lingxuan.protocols.repositories import SessionRepository, StoredMessage
 
 
@@ -99,6 +101,7 @@ class ObservationService:
         user_memory: UserMemoryService,
         config: ConfigProvider,
         clock: Clock,
+        plugin_host: PluginHost | None = None,
     ) -> None:
         self._store = store
         self._executor = executor
@@ -108,6 +111,7 @@ class ObservationService:
         self._user_memory = user_memory
         self._config = config
         self._clock = clock
+        self._plugin_host = plugin_host
 
     # ── config helpers ────────────────────────────────────────────────────
 
@@ -454,6 +458,21 @@ class ObservationService:
             self._store.mark_observed(group_id)
             return
 
+        # Plugin hook: on_before_reply (observation path)
+        reply_plan = ReplyPlan(
+            should_reply=True, reason="observation", stream=True,
+            observation_text=observation,
+            primary_user_id=target[0],
+        )
+        if self._plugin_host is not None:
+            ctx = PluginContext(hook=HookType.on_before_reply, reply_plan=reply_plan)
+            ctx = await self._plugin_host.dispatch(ctx)
+            if ctx.reply_plan is not None:
+                reply_plan = ctx.reply_plan
+            if not reply_plan.should_reply:
+                self._store.mark_observed(group_id)
+                return
+
         await self._send_group_reply(group_id, target, observation)
         self._store.mark_observed(group_id)
 
@@ -498,6 +517,19 @@ class ObservationService:
                     self._bot_name, nickname, observation, reply_text
                 ),
             )
+
+            # Plugin hook: on_after_reply (observation path)
+            if self._plugin_host is not None:
+                ctx = PluginContext(
+                    hook=HookType.on_after_reply,
+                    extra={
+                        "reply_text": reply_text,
+                        "session_id": session_id.as_str(),
+                        "at_user_id": user_id,
+                        "source": "observation",
+                    },
+                )
+                await self._plugin_host.dispatch(ctx)
 
     def _format_entities_text(self, group_id: int, session_id: SessionId) -> str:
         """Format group entities as context text.

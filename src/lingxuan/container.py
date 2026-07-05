@@ -38,6 +38,9 @@ from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.core.stats import StatsService
 from lingxuan.core.user_memory import UserMemoryService
+from lingxuan.plugins.host import DefaultPluginHost
+from lingxuan.plugins.loader import PluginLoader
+from lingxuan.plugins.services import PluginServices
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
@@ -45,6 +48,7 @@ from lingxuan.protocols.logging import LogSink
 from lingxuan.protocols.memory import MemoryService as MemoryServiceProtocol
 from lingxuan.protocols.memory import UserMemoryService as UserMemoryServiceProtocol
 from lingxuan.protocols.messaging import MessageTransport, SessionId
+from lingxuan.protocols.plugins import HookType, PluginContext
 from lingxuan.protocols.repositories import (
     AdminUserRepository,
     AuditRepository,
@@ -343,6 +347,7 @@ class Container:
             config=self.config,
             clock=self.clock,
             log=self.log,
+            plugin_host=self.plugin_host,
         )
 
     def _build_memory_access(self) -> _DbMemoryAccess:
@@ -364,6 +369,7 @@ class Container:
             user_memory=self.user_memory,
             config=self.config,
             clock=self.clock,
+            plugin_host=self.plugin_host,
         )
 
     def _build_admin_commands(self) -> AdminCommandService:
@@ -392,6 +398,7 @@ class Container:
             sessions=self.session_repo,
             clock=self.clock,
             group_executor=self.group_executor,
+            plugin_host=self.plugin_host,
         )
 
     def _build_stats_service(self) -> StatsService:
@@ -400,6 +407,67 @@ class Container:
             users=self.user_profile_repo,
             graph=self.social_graph_repo,
         )
+
+    def _build_plugin_host(self) -> DefaultPluginHost:
+        # Built without services initially; services are set via
+        # set_services() before discover_and_register() is called,
+        # breaking the host→services→user_memory→host cycle.
+        return DefaultPluginHost()
+
+    def _build_plugin_services(self) -> PluginServices:
+        return PluginServices(
+            sessions=self.session_repo,
+            user_profiles=self.user_profile_repo,
+            social_graph=self.social_graph_repo,
+            user_memory=self.user_memory,
+            config=self.config,
+            log=self.log,
+        )
+
+    def _build_plugin_loader(self) -> PluginLoader:
+        return PluginLoader(
+            host=self.plugin_host,
+            plugin_configs=self.plugin_config_repo,
+            services=self.plugin_services,
+        )
+
+    def wire_config_change_bridge(self) -> None:
+        """Subscribe ConfigProvider changes → PluginHost.dispatch(on_config_change).
+
+        Must be called after ``plugin_host`` and ``config`` are both built.
+        The subscription is synchronous (ConfigProvider callback contract);
+        the async dispatch is scheduled onto the event loop.
+        """
+        import asyncio
+
+        host = self.plugin_host
+
+        def _on_config_change(key: str, value: object) -> None:
+            ctx = PluginContext(
+                hook=HookType.on_config_change,
+                extra={"key": key, "value": value},
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(host.dispatch(ctx))
+            except RuntimeError:
+                pass
+
+        self.config.subscribe(_on_config_change)
+
+    async def init_plugins(self) -> None:
+        """Wire plugin services and discover/register all plugins.
+
+        Must be called once during startup, after the event loop is running.
+        This sets the services on the host (breaking the construction cycle),
+        wires the config-change bridge, then discovers and registers plugins.
+        """
+        # Set services on host so plugin.setup() receives the real services
+        self.plugin_host.set_services(self.plugin_services)
+        # Bridge config changes to on_config_change hook
+        self.wire_config_change_bridge()
+        # Discover and register built-in + entry_point plugins
+        await self.plugin_loader.discover_and_register()
 
     # ── public properties (lazy singletons) ───────────────────────────────
 
@@ -510,6 +578,18 @@ class Container:
     @property
     def stats_service(self) -> StatsService:
         return self._get_or_build("stats_service")  # type: ignore[return-value]
+
+    @property
+    def plugin_host(self) -> DefaultPluginHost:
+        return self._get_or_build("plugin_host")  # type: ignore[return-value]
+
+    @property
+    def plugin_services(self) -> PluginServices:
+        return self._get_or_build("plugin_services")  # type: ignore[return-value]
+
+    @property
+    def plugin_loader(self) -> PluginLoader:
+        return self._get_or_build("plugin_loader")  # type: ignore[return-value]
 
 
 def build_container() -> Container:

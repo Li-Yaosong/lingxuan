@@ -32,6 +32,7 @@ from lingxuan.protocols.messaging import (
 )
 from lingxuan.protocols.plugins import HookType, PluginContext, PluginHost
 from lingxuan.protocols.repositories import SessionRepository, StoredMessage
+from lingxuan.protocols.messaging import ReplyPlan
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +182,12 @@ class DialogueService:
             summary=summary,
         )
 
+        # Plugin hook: on_before_reply
+        reply_plan = ReplyPlan(should_reply=True, reason="private_chat", stream=False)
+        reply_plan = await self._dispatch_before_reply(inbound, reply_plan)
+        if not reply_plan.should_reply:
+            return
+
         reply = await self._llm.chat(messages)
 
         await self._memory.append_message(
@@ -193,6 +200,11 @@ class DialogueService:
             chunks=[OutboundChunk(text=reply)],
         )
         await self._transport.send(out)
+
+        # Plugin hook: on_after_reply
+        await self._dispatch_after_reply(
+            inbound, reply, target_session_id=inbound.session_id,
+        )
 
         await self._user_memory.schedule_cognition_refine(
             inbound.actor.user_id,
@@ -309,6 +321,14 @@ class DialogueService:
             ),
         )
 
+        # Plugin hook: on_before_reply
+        reply_plan = ReplyPlan(
+            should_reply=True, reason="group_at_direct", stream=True,
+        )
+        reply_plan = await self._dispatch_before_reply(inbound, reply_plan)
+        if not reply_plan.should_reply:
+            return
+
         # Generate and send reply via GroupReplyExecutor
         reply_text = await self._group_executor.execute(
             session_id=inbound.session_id,
@@ -343,11 +363,58 @@ class DialogueService:
                 ),
             )
 
+            # Plugin hook: on_after_reply
+            await self._dispatch_after_reply(
+                inbound, reply_text,
+                target_session_id=inbound.session_id,
+                at_user_id=inbound.actor.user_id,
+            )
+
     # ── helpers ────────────────────────────────────────────────────────────
 
     def _observation_context_lines(self, group_id: int, limit: int = 3) -> list[str]:
         entries = self._obs_store.recent(group_id, limit=limit)
         return [f"[{e.nickname}]: {e.text}" for e in entries]
+
+    # ── plugin hook helpers ────────────────────────────────────────────────
+
+    async def _dispatch_before_reply(
+        self,
+        inbound: InboundMessage,
+        reply_plan: ReplyPlan,
+    ) -> ReplyPlan:
+        """Dispatch on_before_reply and return the (possibly modified) plan."""
+        if self._plugin_host is None:
+            return reply_plan
+        ctx = PluginContext(
+            hook=HookType.on_before_reply,
+            inbound=inbound,
+            reply_plan=reply_plan,
+        )
+        ctx = await self._plugin_host.dispatch(ctx)
+        return ctx.reply_plan if ctx.reply_plan is not None else reply_plan
+
+    async def _dispatch_after_reply(
+        self,
+        inbound: InboundMessage,
+        reply_text: str,
+        *,
+        target_session_id: SessionId | None = None,
+        at_user_id: int | None = None,
+    ) -> None:
+        """Dispatch on_after_reply after a reply has been sent."""
+        if self._plugin_host is None:
+            return
+        ctx = PluginContext(
+            hook=HookType.on_after_reply,
+            inbound=inbound,
+            extra={
+                "reply_text": reply_text,
+                "session_id": target_session_id.as_str() if target_session_id else "",
+                "at_user_id": at_user_id or 0,
+            },
+        )
+        await self._plugin_host.dispatch(ctx)
 
 
 def _format_exchange(
