@@ -181,7 +181,7 @@ class SqlSessionRepository:
     # ------------------------------------------------------------------
 
     async def load_history(
-        self, sid: SessionId, *, limit: int | None = None
+        self, sid: SessionId, *, limit: int | None = None, before_seq: int | None = None
     ) -> list[StoredMessage]:
         key = sid.as_str()
         async with self._db.session() as s:
@@ -190,6 +190,24 @@ class SqlSessionRepository:
                 .where(SessionMessageRow.session_id == key)
                 .order_by(SessionMessageRow.id.desc())
             )
+            if before_seq is not None:
+                # Keyset: find the row with this seq, then get rows with smaller id
+                sub = (
+                    select(SessionMessageRow.id)
+                    .where(
+                        SessionMessageRow.session_id == key,
+                        SessionMessageRow.seq == before_seq,
+                    )
+                    .limit(1)
+                )
+                stmt = (
+                    select(SessionMessageRow)
+                    .where(
+                        SessionMessageRow.session_id == key,
+                        SessionMessageRow.id < sub,
+                    )
+                    .order_by(SessionMessageRow.id.desc())
+                )
             if limit is not None:
                 stmt = stmt.limit(limit)
             result = await s.execute(stmt)
@@ -366,13 +384,39 @@ class SqlSessionRepository:
     # ------------------------------------------------------------------
 
     async def list_sessions(
-        self, *, limit: int = 50, before_id: int | None = None
+        self, *, limit: int = 50, before_id: str | None = None
     ) -> list[Session]:
         async with self._db.session() as s:
             stmt = select(SessionRow).order_by(SessionRow.session_id).limit(limit)
+            if before_id is not None:
+                stmt = stmt.where(SessionRow.session_id < before_id)
             result = await s.execute(stmt)
             rows = result.scalars().all()
             return [_row_to_session(r) for r in rows]
+
+    async def list_all_sessions(self) -> list[Session]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SessionRow).order_by(SessionRow.session_id)
+            )
+            rows = result.scalars().all()
+            return [_row_to_session(r) for r in rows]
+
+    async def list_all_messages(self) -> list[StoredMessage]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SessionMessageRow).order_by(SessionMessageRow.id)
+            )
+            rows = result.scalars().all()
+            return [_row_to_stored_message(r) for r in rows]
+
+    async def list_all_entities(self) -> list[tuple[str, str, int]]:
+        """Return all session entities as (session_id, name, user_id) tuples."""
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SessionEntityRow.session_id, SessionEntityRow.name, SessionEntityRow.user_id)
+            )
+            return list(result.all())
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +525,14 @@ class SqlSocialGraphRepository:
                 select(SocialEdgeRow)
                 .where(SocialEdgeRow.from_user_id == user_id)
                 .order_by(SocialEdgeRow.id)
+            )
+            rows = result.scalars().all()
+            return [_row_to_social_edge(r) for r in rows]
+
+    async def all_edges(self) -> list[SocialEdge]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(SocialEdgeRow).order_by(SocialEdgeRow.id)
             )
             rows = result.scalars().all()
             return [_row_to_social_edge(r) for r in rows]
@@ -775,6 +827,40 @@ class SqlUserProfileRepository:
                 select(UserProfileRow.user_id)
             )
             return [uid for (uid,) in result.all()]
+
+    async def list_profiles(
+        self, *, limit: int = 50, before_user_id: int | None = None
+    ) -> list[UserProfile]:
+        async with self._db.session() as s:
+            stmt = (
+                select(UserProfileRow)
+                .options(selectinload(UserProfileRow.facts))
+                .order_by(UserProfileRow.user_id)
+                .limit(limit)
+            )
+            if before_user_id is not None:
+                stmt = stmt.where(UserProfileRow.user_id < before_user_id)
+            result = await s.execute(stmt)
+            rows = result.scalars().all()
+            return [_row_to_user_profile(r) for r in rows]
+
+    async def list_all_profiles(self) -> list[UserProfile]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserProfileRow)
+                .options(selectinload(UserProfileRow.facts))
+                .order_by(UserProfileRow.user_id)
+            )
+            rows = result.scalars().all()
+            return [_row_to_user_profile(r) for r in rows]
+
+    async def list_all_facts(self) -> list[UserFact]:
+        async with self._db.session() as s:
+            result = await s.execute(
+                select(UserFactRow).order_by(UserFactRow.user_id, UserFactRow.learned_at)
+            )
+            rows = result.scalars().all()
+            return [_row_to_user_fact(r) for r in rows]
 
     # ------------------------------------------------------------------
     # count_users

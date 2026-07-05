@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from lingxuan.admin.auth import InvalidTokenError, decode_token
+from lingxuan.adapters.storage.db import Database
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
@@ -104,6 +105,10 @@ def _get_stats_service() -> object:
     return get_container().stats_service
 
 
+def _get_db() -> Database:
+    return get_container().db
+
+
 # Annotated aliases — use these in route handlers
 ConfigDep = Annotated[ConfigProvider, Depends(_get_config)]
 LogDep = Annotated[LogSink, Depends(_get_log)]
@@ -118,6 +123,7 @@ TransportDep = Annotated[MessageTransport, Depends(_get_transport)]
 LLMDep = Annotated[LLMProvider, Depends(_get_llm)]
 ObservationStoreDep = Annotated[Any, Depends(_get_observation_store)]
 StatsServiceDep = Annotated[Any, Depends(_get_stats_service)]
+DatabaseDep = Annotated[Database, Depends(_get_db)]
 
 
 # ── auth dependencies ────────────────────────────────────────────────────

@@ -69,12 +69,14 @@ def create_admin_app(container: Container) -> FastAPI:
     # ── Route aggregation ────────────────────────────────────────────────
     from lingxuan.admin.routes import auth as auth_routes
     from lingxuan.admin.routes import config as config_routes
+    from lingxuan.admin.routes import data as data_routes
     from lingxuan.admin.routes import logs as logs_routes
     from lingxuan.admin.routes import status as status_routes
     from lingxuan.admin import ws as ws_module
 
     app.include_router(auth_routes.router, prefix="/admin/api")
     app.include_router(config_routes.router, prefix="/admin/api")
+    app.include_router(data_routes.router, prefix="/admin/api")
     app.include_router(logs_routes.router, prefix="/admin/api")
     app.include_router(status_routes.router, prefix="/admin/api")
     app.include_router(ws_module.router)

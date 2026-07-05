@@ -59,10 +59,12 @@ class InMemorySessionRepository:
         self._seq[key] = seq + 1
 
     async def load_history(
-        self, sid: SessionId, *, limit: int | None = None
+        self, sid: SessionId, *, limit: int | None = None, before_seq: int | None = None
     ) -> list[StoredMessage]:
         key = sid.as_str()
         msgs = self._messages.get(key, [])
+        if before_seq is not None:
+            msgs = [m for m in msgs if m.seq < before_seq]
         if limit is not None:
             return msgs[-limit:]
         return list(msgs)
@@ -127,9 +129,28 @@ class InMemorySessionRepository:
         return dict(self._entities.get(sid.as_str(), {}))
 
     async def list_sessions(
-        self, *, limit: int = 50, before_id: int | None = None
+        self, *, limit: int = 50, before_id: str | None = None
     ) -> list[Session]:
-        return list(self._sessions.values())[:limit]
+        items = sorted(self._sessions.values(), key=lambda s: s.session_id.as_str())
+        if before_id is not None:
+            items = [s for s in items if s.session_id.as_str() < before_id]
+        return items[:limit]
+
+    async def list_all_sessions(self) -> list[Session]:
+        return list(self._sessions.values())
+
+    async def list_all_messages(self) -> list[StoredMessage]:
+        result: list[StoredMessage] = []
+        for key in self._sessions:
+            result.extend(self._messages.get(key, []))
+        return result
+
+    async def list_all_entities(self) -> list[tuple[str, str, int]]:
+        result: list[tuple[str, str, int]] = []
+        for key, entities in self._entities.items():
+            for name, uid in entities.items():
+                result.append((key, name, uid))
+        return result
 
 
 class InMemoryUserProfileRepository:
@@ -192,6 +213,23 @@ class InMemoryUserProfileRepository:
     async def list_user_ids(self) -> list[int]:
         return list(self._profiles.keys())
 
+    async def list_profiles(
+        self, *, limit: int = 50, before_user_id: int | None = None
+    ) -> list[UserProfile]:
+        items = sorted(self._profiles.values(), key=lambda p: p.user_id)
+        if before_user_id is not None:
+            items = [p for p in items if p.user_id < before_user_id]
+        return items[:limit]
+
+    async def list_all_profiles(self) -> list[UserProfile]:
+        return list(self._profiles.values())
+
+    async def list_all_facts(self) -> list[UserFact]:
+        result: list[UserFact] = []
+        for p in self._profiles.values():
+            result.extend(p.facts)
+        return result
+
     async def count_users(self) -> int:
         return len(self._profiles)
 
@@ -235,6 +273,9 @@ class InMemorySocialGraphRepository:
 
     async def edges_from(self, user_id: int) -> list[SocialEdge]:
         return [e for e in self._edges if e.from_user_id == user_id]
+
+    async def all_edges(self) -> list[SocialEdge]:
+        return list(self._edges)
 
     async def all_names(self) -> dict[str, int]:
         return dict(self._name_index)
