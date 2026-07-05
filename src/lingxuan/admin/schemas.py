@@ -232,3 +232,73 @@ class ImportRequest(BaseModel):
 
     confirm: bool = False
     data: ExportData
+
+
+# ---------------------------------------------------------------------------
+# Plugin schemas (P5-06)
+# ---------------------------------------------------------------------------
+
+
+class PluginHookItem(BaseModel):
+    """One hook subscription of a plugin."""
+
+    name: str
+
+
+class PluginItem(BaseModel):
+    """Plugin info returned by GET /plugins."""
+
+    name: str
+    version: str
+    enabled: bool
+    hooks: list[str]
+    config: dict = {}
+    config_reload_strategy: str = "hot"
+    """How config changes take effect: 'hot' = immediate via on_config_change, 'reload' = requires plugin re-setup."""
+
+
+class PluginListResponse(BaseModel):
+    """Response for GET /plugins."""
+
+    items: list[PluginItem]
+
+
+class PluginUpdateRequest(BaseModel):
+    """Body for PUT /plugins/{name}."""
+
+    enabled: bool | None = None
+    config: dict | None = None
+
+
+class PluginUpdateResponse(BaseModel):
+    """Response for PUT /plugins/{name}."""
+
+    name: str
+    enabled: bool
+    config: dict = {}
+    config_reload_strategy: str = "hot"
+
+
+# ---------------------------------------------------------------------------
+# Audit schemas (P5-06)
+# ---------------------------------------------------------------------------
+
+
+class AuditEntryItem(BaseModel):
+    """One audit log entry."""
+
+    id: int
+    actor: str
+    action: str
+    target: str = ""
+    detail: dict = {}
+    ip: str = ""
+    success: bool = True
+    created_at: str = ""
+
+
+class AuditListResponse(BaseModel):
+    """Response for GET /audit."""
+
+    items: list[AuditEntryItem]
+    has_more: bool

@@ -19,6 +19,7 @@ from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
 from lingxuan.protocols.messaging import MessageTransport
+from lingxuan.protocols.plugins import PluginHost
 from lingxuan.protocols.repositories import (
     AdminUserRepository,
     AuditRepository,
@@ -109,6 +110,10 @@ def _get_db() -> Database:
     return get_container().db
 
 
+def _get_plugin_host() -> PluginHost:
+    return get_container().plugin_host
+
+
 # Annotated aliases — use these in route handlers
 ConfigDep = Annotated[ConfigProvider, Depends(_get_config)]
 LogDep = Annotated[LogSink, Depends(_get_log)]
@@ -124,6 +129,7 @@ LLMDep = Annotated[LLMProvider, Depends(_get_llm)]
 ObservationStoreDep = Annotated[Any, Depends(_get_observation_store)]
 StatsServiceDep = Annotated[Any, Depends(_get_stats_service)]
 DatabaseDep = Annotated[Database, Depends(_get_db)]
+PluginHostDep = Annotated[PluginHost, Depends(_get_plugin_host)]
 
 
 # ── auth dependencies ────────────────────────────────────────────────────
