@@ -343,6 +343,7 @@ class Container:
         return UserMemoryService(
             profiles=self.user_profile_repo,
             graph=self.social_graph_repo,
+            sessions=self.session_repo,
             llm=self.llm,
             config=self.config,
             clock=self.clock,

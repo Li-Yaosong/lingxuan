@@ -70,3 +70,24 @@ class UserMemoryService(Protocol):
         group_id: int | None = None,
         context_lines: list[str] | None = None,
     ) -> None: ...
+
+    async def merge_entity(
+        self, session_id: object, name: str, user_id: int
+    ) -> None: ...
+
+    async def sync_entity_to_graph(
+        self, name: str, user_id: int, session_id: str = ""
+    ) -> None: ...
+
+    async def index_name(self, name: str, user_id: int) -> None: ...
+
+    async def apply_rule_extraction(
+        self,
+        user_id: int,
+        text: str,
+        *,
+        nickname: str = "",
+        group_id: int | None = None,
+        at_user_ids: list[int] | None = None,
+        session_id: str = "",
+    ) -> bool: ...

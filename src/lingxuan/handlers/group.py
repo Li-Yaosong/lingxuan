@@ -7,7 +7,6 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent
 
 from lingxuan.admin import CommandContext, parse_command, run_command
 from lingxuan.config import _cfg
-from lingxuan.group_entities import learn_entities_from_entry
 from lingxuan.group_observer import (
     ObservationEntry,
     append_bot_message,
@@ -349,7 +348,6 @@ async def handle_group(bot: Bot, event: GroupMessageEvent) -> None:
         at_user_ids=_parse_at_user_ids(event),
     )
     append_entry(group_id, obs_entry)
-    learn_entities_from_entry(session_id, group_id, obs_entry)
     schedule_memory_extract(
         event.user_id,
         user_message or ("在呢" if at_bot else ""),

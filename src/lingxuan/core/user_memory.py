@@ -28,6 +28,7 @@ from lingxuan.protocols.llm import ChatMessage, LLMProvider
 from lingxuan.protocols.logging import LogSink, LogRecord
 from lingxuan.protocols.plugins import HookType, PluginContext, PluginHost
 from lingxuan.protocols.repositories import (
+    SessionRepository,
     SocialEdge,
     SocialGraphRepository,
     UserFact,
@@ -98,6 +99,7 @@ class UserMemoryService:
         *,
         profiles: UserProfileRepository,
         graph: SocialGraphRepository,
+        sessions: SessionRepository | None = None,
         llm: LLMProvider,
         config: ConfigProvider,
         clock: Clock,
@@ -106,6 +108,7 @@ class UserMemoryService:
     ) -> None:
         self._profiles = profiles
         self._graph = graph
+        self._sessions = sessions
         self._llm = llm
         self._config = config
         self._clock = clock
@@ -323,8 +326,21 @@ class UserMemoryService:
         """Sync group session entity to global name index and user profile."""
         await self.index_name(name, user_id)
         profile = await self.touch_user(user_id, nickname=name)
-        # Session entity merge is handled by caller (DialogueService)
-        # using SessionRepository.merge_entity — not our concern here.
+        if session_id and self._sessions is not None:
+            from lingxuan.protocols.messaging import SessionId
+            sid = SessionId.parse(session_id) if isinstance(session_id, str) else session_id
+            await self._sessions.merge_entity(sid, name, user_id)
+
+    async def merge_entity(
+        self, session_id: Any, name: str, user_id: int
+    ) -> None:
+        """Merge a name→user_id mapping into a session's entity index."""
+        if self._sessions is None:
+            return
+        name = name.strip()
+        if not name or not user_id:
+            return
+        await self._sessions.merge_entity(session_id, name, user_id)
 
     # ------------------------------------------------------------------
     # Rule extraction

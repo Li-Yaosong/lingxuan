@@ -273,8 +273,8 @@ class DialogueService:
             group_id=group_id,
         )
 
-        # Entity learning / memory extract (Phase 5: plugin takes over;
-        # Phase 1: keep direct call via user_memory.schedule_memory_extract)
+        # Entity learning is handled by the group_entities plugin (on_inbound_message).
+        # schedule_memory_extract remains here for LLM-based fact extraction.
         clean_message = inbound.text.strip() or ("在呢" if at_bot else "")
         await self._user_memory.schedule_memory_extract(
             inbound.actor.user_id,
