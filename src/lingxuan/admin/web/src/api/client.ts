@@ -223,6 +223,21 @@ export interface LLMCheckResponse {
   error: string | null;
 }
 
+// ── Log types ──────────────────────────────────────────────────────
+
+export interface LogRecordItem {
+  ts: string;
+  level: string;
+  logger: string;
+  msg: string;
+  extra: Record<string, unknown>;
+}
+
+export interface LogsResponse {
+  records: LogRecordItem[];
+  total: number;
+}
+
 // ── Typed API calls ──────────────────────────────────────────────────────
 
 export const authApi = {
@@ -271,4 +286,14 @@ export const statusApi = {
 
   llmCheck: () =>
     api.post<LLMCheckResponse>("/admin/api/status/llm-check"),
+};
+
+export const logsApi = {
+  history: (limit = 200, level?: string, keyword?: string) => {
+    const params = new URLSearchParams();
+    params.set("limit", String(limit));
+    if (level) params.set("level", level);
+    if (keyword) params.set("keyword", keyword);
+    return api.get<LogsResponse>(`/admin/api/logs?${params.toString()}`);
+  },
 };
