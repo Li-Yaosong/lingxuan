@@ -8,6 +8,11 @@ import DashboardPage from "./pages/DashboardPage";
 import ConfigPage from "./pages/ConfigPage";
 import StatusPage from "./pages/StatusPage";
 import LogsPage from "./pages/LogsPage";
+import DataPage, { DataSessionsTab, DataUsersTab, DataSocialGraphTab } from "./pages/DataPage";
+import SessionDetailPage from "./pages/SessionDetailPage";
+import UserDetailPage from "./pages/UserDetailPage";
+import PluginsPage from "./pages/PluginsPage";
+import AuditPage from "./pages/AuditPage";
 import "./styles/global.css";
 
 export default function App() {
@@ -38,6 +43,15 @@ export default function App() {
             <Route path="/config" element={<ConfigPage />} />
             <Route path="/status" element={<StatusPage />} />
             <Route path="/logs" element={<LogsPage />} />
+            <Route path="/data" element={<DataPage />}>
+              <Route index element={<DataSessionsTab />} />
+              <Route path="sessions/:sessionId" element={<SessionDetailPage />} />
+              <Route path="users" element={<DataUsersTab />} />
+              <Route path="users/:uid" element={<UserDetailPage />} />
+              <Route path="social-graph" element={<DataSocialGraphTab />} />
+            </Route>
+            <Route path="/plugins" element={<PluginsPage />} />
+            <Route path="/audit" element={<AuditPage />} />
           </Route>
         </Routes>
       </AuthProvider>

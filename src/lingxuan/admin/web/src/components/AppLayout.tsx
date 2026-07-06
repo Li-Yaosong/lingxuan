@@ -26,9 +26,20 @@ export default function AppLayout() {
           <NavLink to="/status" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
             状态
           </NavLink>
+          <NavLink to="/data" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+            数据
+          </NavLink>
+          <NavLink to="/plugins" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+            插件
+          </NavLink>
           <NavLink to="/logs" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
             日志
           </NavLink>
+          {user?.role === "admin" && (
+            <NavLink to="/audit" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+              审计
+            </NavLink>
+          )}
         </nav>
         <div className="sidebar-footer">
           <span className="user-info">{user?.username}</span>
