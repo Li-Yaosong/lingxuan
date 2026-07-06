@@ -11,6 +11,8 @@ All time-dependent logic uses the injected ``Clock``; config via
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 
 from lingxuan.core.group_reply_executor import GroupReplyExecutor
@@ -407,9 +409,7 @@ class ObservationService:
                     break
                 state.pending_observe = False
         except Exception:
-            # Swallow to avoid crashing the loop; in production a LogSink
-            # would record this — kept minimal for Core layer.
-            pass
+            logging.getLogger(__name__).exception("观察循环异常 group=%s", group_id)
         finally:
             state.observe_in_flight = False
             if state.pending_observe and self._store.has_new_since_observe(group_id):
@@ -418,6 +418,8 @@ class ObservationService:
 
     async def _observe(self, group_id: int) -> None:
         """Core observation logic — aligns with MVP _observe_group."""
+        log = logging.getLogger(__name__)
+
         if not self._observe_enabled:
             self._store.mark_observed(group_id)
             return
@@ -433,6 +435,9 @@ class ObservationService:
 
         shortcircuit, reason = self._should_shortcircuit_judge(group_id)
         bypass = self.should_bypass_cooldown(group_id)
+
+        log.info("观察决策 group=%s shortcircuit=%s reason=%s bypass=%s cooldown=%s",
+                 group_id, shortcircuit, reason, bypass, self.is_in_cooldown(group_id))
 
         if not shortcircuit and not bypass and self.is_in_cooldown(group_id):
             self._store.mark_observed(group_id)
