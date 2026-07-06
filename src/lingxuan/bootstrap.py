@@ -66,6 +66,10 @@ async def _startup(container: Container) -> None:
     # Initialize plugins: wire services, bridge config changes, discover & register
     await container.init_plugins()
 
+    # Auto-start NapCat if configured
+    if container.config.get_bool("NAPCAT_AUTO_START"):
+        _try_start_napcat(container.config)
+
     # Validate config
     issues = _validate_config(container)
 
@@ -86,6 +90,38 @@ async def _shutdown(container: Container) -> None:
     """Shutdown hook: dispose DB, log departure."""
     await container.db.dispose()
     nonebot.logger.info("灵轩下线~")
+
+
+def _try_start_napcat(config: "ConfigProvider") -> None:
+    """Try to auto-start NapCat in background mode.
+
+    Non-fatal: if NapCat is already running or can't start, just log a warning.
+    """
+    from pathlib import Path
+
+    from lingxuan.napcat.manager import NapCatManager
+
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
+
+    # Expand relative paths
+    data_root = Path(config.get_str("DATA_ROOT"))
+    if not napcat_dir.is_absolute():
+        napcat_dir = data_root / napcat_dir
+    if not qq_dir.is_absolute():
+        qq_dir = data_root / qq_dir
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+
+    if manager.is_running():
+        nonebot.logger.info("NapCat 已在运行中，跳过自动启动")
+        return
+
+    try:
+        manager.start(foreground=False)
+        nonebot.logger.info("NapCat 自动启动成功")
+    except Exception as exc:
+        nonebot.logger.warning("NapCat 自动启动失败: {}", exc)
 
 
 def _start_admin_server(container: Container, driver: nonebot.drivers.Driver) -> None:

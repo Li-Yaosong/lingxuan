@@ -116,6 +116,18 @@ SETTINGS: list[SettingSpec] = [
                 description="Access token TTL in seconds"),
     SettingSpec("JWT_REFRESH_TTL", "int", 604800, "security",
                 description="Refresh token TTL in seconds"),
+    # ── napcat ───────────────────────────────────────────────────────────
+    SettingSpec("NAPCAT_DIR", "str", "./data/napcat", "napcat",
+                hot_reloadable=False,
+                description="NapCat installation directory"),
+    SettingSpec("NAPCAT_QQ_DIR", "str", "./data/qq", "napcat",
+                hot_reloadable=False,
+                description="LinuxQQ installation directory"),
+    SettingSpec("NAPCAT_WS_URL", "str", "ws://127.0.0.1:8080/onebot/v11/ws", "napcat",
+                description="Reverse WebSocket URL for NapCat to connect to lingxuan"),
+    SettingSpec("NAPCAT_AUTO_START", "bool", False, "napcat",
+                hot_reloadable=False,
+                description="Auto-start NapCat when lingxuan runs"),
 ]
 
 SETTINGS_BY_KEY: dict[str, SettingSpec] = {s.key: s for s in SETTINGS}

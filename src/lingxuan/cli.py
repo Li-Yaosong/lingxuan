@@ -129,6 +129,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Role for new user (default: admin; ignored if user exists)",
     )
 
+    # ── napcat ──────────────────────────────────────────────────────────
+    napcat_parser = sub.add_parser("napcat", help="NapCat management")
+    napcat_sub = napcat_parser.add_subparsers(dest="napcat_command")
+
+    napcat_sub.add_parser("setup", help="Download and install NapCat + LinuxQQ")
+    napcat_sub.add_parser("start", help="Start NapCat (foreground with QR code)")
+    napcat_sub.add_parser("stop", help="Stop NapCat process")
+    napcat_sub.add_parser("status", help="Check NapCat running status")
+    napcat_sub.add_parser("logs", help="Show recent NapCat logs")
+
     return parser
 
 
@@ -437,8 +447,91 @@ def _cmd_admin_passwd(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Public API (for testing without sys.argv mutation)
+# Napcat subcommands
 # ---------------------------------------------------------------------------
+
+
+def _cmd_napcat_setup(args: argparse.Namespace) -> None:
+    """Download and install NapCat + LinuxQQ."""
+    from lingxuan.napcat.installer import run_setup
+
+    db_url, data_root = _resolve_config_paths(args)
+    napcat_dir = os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat"))
+    qq_dir = os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq"))
+    ws_url = os.environ.get("NAPCAT_WS_URL", "ws://127.0.0.1:8080/onebot/v11/ws")
+
+    run_setup(
+        napcat_dir=Path(napcat_dir),
+        qq_dir=Path(qq_dir),
+        ws_url=ws_url,
+    )
+
+
+def _cmd_napcat_start(args: argparse.Namespace) -> None:
+    """Start NapCat in the foreground (shows QR code for login)."""
+    from lingxuan.napcat.manager import NapCatManager
+
+    db_url, data_root = _resolve_config_paths(args)
+    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
+    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+
+    try:
+        manager.start(foreground=True)
+        # Block until the process exits
+        if manager._qq_proc is not None:
+            manager._qq_proc.wait()
+    except KeyboardInterrupt:
+        print("\n→ 收到中断信号，停止 NapCat...")
+        manager.stop()
+    except RuntimeError as e:
+        print(f"✗ 启动失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_napcat_stop(args: argparse.Namespace) -> None:
+    """Stop the running NapCat process."""
+    from lingxuan.napcat.manager import NapCatManager
+
+    db_url, data_root = _resolve_config_paths(args)
+    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
+    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    manager.stop()
+
+
+def _cmd_napcat_status(args: argparse.Namespace) -> None:
+    """Check NapCat running status."""
+    from lingxuan.napcat.manager import NapCatManager
+
+    db_url, data_root = _resolve_config_paths(args)
+    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
+    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    info = manager.status()
+
+    if info["running"]:
+        print(f"✓ NapCat 运行中 (PID {info['pid']})")
+    else:
+        print("✗ NapCat 未运行")
+
+    print(f"  安装目录: {info['napcat_dir']}")
+    print(f"  QQ 目录:  {info['qq_dir']}")
+
+
+def _cmd_napcat_logs(args: argparse.Namespace) -> None:
+    """Show recent NapCat logs."""
+    from lingxuan.napcat.manager import NapCatManager
+
+    db_url, data_root = _resolve_config_paths(args)
+    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
+    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    print(manager.tail_logs(lines=100))
 
 
 def dispatch(args: argparse.Namespace) -> None:
@@ -475,6 +568,21 @@ def dispatch(args: argparse.Namespace) -> None:
         _cmd_restore(args)
     elif command == "admin-passwd":
         _cmd_admin_passwd(args)
+    elif command == "napcat":
+        napcat_cmd = args.napcat_command
+        if napcat_cmd == "setup":
+            _cmd_napcat_setup(args)
+        elif napcat_cmd == "start":
+            _cmd_napcat_start(args)
+        elif napcat_cmd == "stop":
+            _cmd_napcat_stop(args)
+        elif napcat_cmd == "status":
+            _cmd_napcat_status(args)
+        elif napcat_cmd == "logs":
+            _cmd_napcat_logs(args)
+        else:
+            print("用法: lingxuan napcat {setup|start|stop|status|logs}", file=sys.stderr)
+            sys.exit(1)
     else:
         print(f"未知子命令: {command}", file=sys.stderr)
         sys.exit(1)

@@ -96,7 +96,7 @@ def test_secret_keys() -> None:
 
 def test_non_hot_reloadable_keys() -> None:
     non_reloadable = {s.key for s in SETTINGS if not s.hot_reloadable}
-    expected = {"DRIVER", "DB_URL", "DATA_ROOT", "ADMIN_HOST", "ADMIN_PORT", "SECRET_KEY", "AUTO_MIGRATE"}
+    expected = {"DRIVER", "DB_URL", "DATA_ROOT", "ADMIN_HOST", "ADMIN_PORT", "SECRET_KEY", "AUTO_MIGRATE", "NAPCAT_DIR", "NAPCAT_QQ_DIR", "NAPCAT_AUTO_START"}
     assert non_reloadable == expected
 
 
