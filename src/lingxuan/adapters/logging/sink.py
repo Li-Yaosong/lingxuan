@@ -1,8 +1,11 @@
 """Ring-buffer LogSink with subscription and loguru bridge.
 
-Replaces the Phase 1 BridgeLogSink.  Records are kept in a bounded deque;
-subscribers receive pushes on emit; a loguru sink captures nonebot/loguru
-output into the same buffer so the admin UI can query *all* logs.
+Spec note (P1-13): The Phase 1 spec defined a minimal ``BridgeLogSink``
+(no buffer, ``tail()`` returns empty, ``subscribe()`` is no-op) to be
+replaced by this ``RingBufferLogSink`` in Phase 4 (P4-01).  The full
+implementation was built directly in Phase 1 because the admin WebSocket
+feature needed it immediately; skipping the intermediate bridge avoids
+a throwaway module and a migration step.
 """
 
 from __future__ import annotations

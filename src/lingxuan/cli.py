@@ -203,12 +203,6 @@ def _cmd_db_revision(args: argparse.Namespace) -> None:
     print(f"Revision generated: {args.message}")
 
 
-def _cmd_not_implemented(name: str) -> None:
-    """Print a not-yet-implemented message and exit with code 1."""
-    print(f"子命令 '{name}' 尚未实现，将在后续任务中完成。", file=sys.stderr)
-    sys.exit(1)
-
-
 def _resolve_config_paths(args: argparse.Namespace) -> tuple[str, str]:
     """Return (db_url, data_root) from CLI overrides / env / defaults."""
     from lingxuan.settings_defaults import SETTINGS_BY_KEY

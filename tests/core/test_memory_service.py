@@ -16,13 +16,18 @@ import pytest
 from lingxuan.core.memory import MemoryService, _is_fallback
 from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
+from lingxuan.core.user_memory import UserMemoryService
 from lingxuan.protocols.messaging import SessionId
 from lingxuan.protocols.repositories import StoredMessage
 from tests.fakes.clock import FakeClock
 from tests.fakes.config import FakeConfigProvider
 from tests.fakes.llm import FakeLLMProvider
 from tests.fakes.logsink import FakeLogSink
-from tests.fakes.repositories import InMemorySessionRepository
+from tests.fakes.repositories import (
+    InMemorySessionRepository,
+    InMemorySocialGraphRepository,
+    InMemoryUserProfileRepository,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +217,121 @@ class TestPassthroughMethods:
 
         count = await sessions.count_messages(sid)
         assert count == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_with_user_profiles(self) -> None:
+        """clear(clear_user_profiles=True) delegates to user_memory.clear_all()."""
+        config = FakeConfigProvider({
+            "MEMORY_WINDOW": 20,
+            "ENABLE_MEMORY_SUMMARY": True,
+            "ENABLE_USER_MEMORY": True,
+        })
+        sessions = InMemorySessionRepository()
+        profiles = InMemoryUserProfileRepository()
+        graph = InMemorySocialGraphRepository()
+        fake_llm = FakeLLMProvider()
+        persona = PersonaService(config)
+        prompt = PromptBuilder(persona, config)
+        clock = FakeClock()
+        log = FakeLogSink()
+
+        user_memory = UserMemoryService(
+            profiles=profiles,
+            graph=graph,
+            llm=fake_llm,
+            config=config,
+            clock=clock,
+            log=log,
+        )
+
+        svc = MemoryService(
+            sessions=sessions,
+            llm=fake_llm,
+            prompt=prompt,
+            config=config,
+            clock=clock,
+            log=log,
+            user_memory=user_memory,
+        )
+
+        sid = _sid()
+        # Create some session data
+        for i in range(3):
+            await svc.append(sid, "user", f"msg-{i}")
+
+        # Create a user profile
+        await profiles.upsert(
+            __import__("lingxuan.protocols.repositories", fromlist=["UserProfile"]).UserProfile(
+                user_id=42, preferred_name="Alice"
+            )
+        )
+        assert len(await profiles.list_user_ids()) == 1
+
+        # Clear with clear_user_profiles=True
+        await svc.clear(sid, clear_user_profiles=True)
+
+        # Session should be cleared
+        count = await sessions.count_messages(sid)
+        assert count == 0
+
+        # User profiles should also be cleared
+        assert len(await profiles.list_user_ids()) == 0
+
+    @pytest.mark.asyncio
+    async def test_clear_without_user_profiles(self) -> None:
+        """clear(clear_user_profiles=False) does NOT clear user profiles."""
+        config = FakeConfigProvider({
+            "MEMORY_WINDOW": 20,
+            "ENABLE_MEMORY_SUMMARY": True,
+            "ENABLE_USER_MEMORY": True,
+        })
+        sessions = InMemorySessionRepository()
+        profiles = InMemoryUserProfileRepository()
+        graph = InMemorySocialGraphRepository()
+        fake_llm = FakeLLMProvider()
+        persona = PersonaService(config)
+        prompt = PromptBuilder(persona, config)
+        clock = FakeClock()
+        log = FakeLogSink()
+
+        user_memory = UserMemoryService(
+            profiles=profiles,
+            graph=graph,
+            llm=fake_llm,
+            config=config,
+            clock=clock,
+            log=log,
+        )
+
+        svc = MemoryService(
+            sessions=sessions,
+            llm=fake_llm,
+            prompt=prompt,
+            config=config,
+            clock=clock,
+            log=log,
+            user_memory=user_memory,
+        )
+
+        sid = _sid()
+        await svc.append(sid, "user", "hello")
+
+        # Create a user profile
+        await profiles.upsert(
+            __import__("lingxuan.protocols.repositories", fromlist=["UserProfile"]).UserProfile(
+                user_id=42, preferred_name="Alice"
+            )
+        )
+
+        # Clear without clear_user_profiles
+        await svc.clear(sid)
+
+        # Session should be cleared
+        count = await sessions.count_messages(sid)
+        assert count == 0
+
+        # User profiles should NOT be cleared
+        assert len(await profiles.list_user_ids()) == 1
 
 
 # ---------------------------------------------------------------------------

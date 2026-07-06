@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -86,7 +85,7 @@ class ObservationEntry:  # 对齐现有 group_observer.ObservationEntry
     reply_to_bot: bool = False
     at_user_ids: list[int] = field(default_factory=list)
     is_bot: bool = False
-    ts: float = field(default_factory=time.time)
+    ts: float = 0.0
 
 
 @dataclass

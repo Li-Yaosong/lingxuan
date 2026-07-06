@@ -146,15 +146,12 @@ class MemoryService:
     ) -> None:
         """Clear session data; optionally clear all user profiles too.
 
-        ``clear_user_profiles=True`` delegates to ``user_memory`` if injected,
+        ``clear_user_profiles=True`` delegates to ``user_memory.clear_all()``,
         matching MVP ``clear_history(clear_user_profiles=True)`` semantics.
         """
         await self._sessions.clear(sid)
         if clear_user_profiles and self._user_memory is not None:
-            # UserMemoryService protocol doesn't expose a clear_all method
-            # directly; the caller coordinates via the injected instance.
-            # For now we rely on admin_commands to handle this explicitly.
-            pass
+            await self._user_memory.clear_all()
 
     # ── summarization ─────────────────────────────────────────────────────
 

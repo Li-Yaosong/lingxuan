@@ -249,10 +249,7 @@ class Container:
         After db + config_repo are built, ``_attach_config_db`` is called
         to wire them together.
         """
-        from lingxuan.config import set_global_config
-
         provider = EnvConfigProvider()
-        set_global_config(provider)
         return provider
 
     def _build_clock(self) -> SystemClock:

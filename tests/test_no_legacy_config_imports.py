@@ -1,10 +1,13 @@
 """Guard test: no module under src/lingxuan/ may import legacy module-level constants.
 
 The old ``lingxuan.config`` module that exported ``BOT_NAME``, ``ENABLE_*``,
-``settings`` singleton, etc. has been deleted.  The current ``lingxuan.config``
-only exports bridge helpers (``_cfg``, ``set_global_config``, ``mask_api_key``).
+``settings`` singleton, etc. has been removed entirely (along with the
+``_cfg()`` bridge and the ``lingxuan-legacy`` entry point).
 
-This test ensures no module re-introduces or imports the old constant pattern.
+This test ensures:
+1. No module imports the old constant pattern from ``lingxuan.config``.
+2. No module under src/lingxuan/ directly imports ``nonebot`` or
+   ``nonebot.adapters.*`` (those belong in adapters/onebot/ only).
 """
 
 from __future__ import annotations
@@ -18,6 +21,9 @@ SRC_DIR = Path(__file__).resolve().parent.parent / "src" / "lingxuan"
 _FORBIDDEN_SYMBOLS = frozenset({
     "settings",
     "Settings",
+    "_cfg",
+    "set_global_config",
+    "mask_api_key",
     "DRIVER",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -77,6 +83,6 @@ def test_no_legacy_config_imports() -> None:
 
     assert not violations, (
         "Found imports of legacy constants from lingxuan.config "
-        "(should use _cfg() or inject ConfigProvider):\n"
+        "(should inject ConfigProvider instead):\n"
         + "\n".join(violations)
     )

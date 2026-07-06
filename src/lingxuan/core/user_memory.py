@@ -881,3 +881,14 @@ class UserMemoryService:
         if self._enabled():
             # Verify repos are functional by listing user IDs
             await self._profiles.list_user_ids()
+
+    async def clear_all(self) -> int:
+        """Delete all user profiles and social graph edges.
+
+        Returns the number of user profiles deleted.
+        Used by ``MemoryService.clear(clear_user_profiles=True)`` to match
+        MVP ``clear_history(clear_user_profiles=True)`` semantics.
+        """
+        n = await self._profiles.delete_all()
+        await self._graph.clear()
+        return n

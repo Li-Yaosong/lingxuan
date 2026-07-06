@@ -127,12 +127,13 @@ def _atomic_replace_file(src: Path, dest: Path) -> None:
 
 
 def _timestamp_dir() -> str:
-    """Return a directory-safe timestamp string ``YYYYMMDD-HHMMSS-ffffff``.
+    """Return a directory-safe timestamp string ``YYYYMMDD-HHMMSS``.
 
-    Includes microseconds to prevent collisions when multiple backups are
-    created within the same second (e.g. auto-snapshot before restore).
+    Matches the spec format from P3-03.  If two backups are created within
+    the same second (e.g. auto-snapshot before restore), the caller should
+    add a numeric suffix to avoid collision.
     """
-    return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S-%f")
+    return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 # ---------------------------------------------------------------------------
@@ -267,6 +268,12 @@ def create_backup(
 
     stamp = _timestamp_dir()
     backup_dir = out_dir / stamp
+    # Avoid collision if a backup already exists in the same second
+    if backup_dir.exists():
+        suffix = 1
+        while (out_dir / f"{stamp}-{suffix}").exists():
+            suffix += 1
+        backup_dir = out_dir / f"{stamp}-{suffix}"
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Backup the SQLite database via online backup API
