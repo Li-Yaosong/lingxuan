@@ -18,8 +18,9 @@ env/
 # Runtime data
 data/
 
-# NapCatQQ
-napcat/
+# NapCatQQ runtime data (root-level only)
+/napcat/
+/loadNapCat.js
 
 # IDE
 .vscode/
