@@ -123,8 +123,6 @@ def _start_admin_server(container: Container, driver: nonebot.drivers.Driver) ->
         host=admin_host,
         port=admin_port,
         log_level="info",
-        # Don't steal the signal handlers — NoneBot owns the lifecycle
-        handle_signals=False,
     )
     server = uvicorn.Server(config)
 
