@@ -38,8 +38,10 @@ def _ensure_db_dir(db_url: str) -> None:
     # Strip leading slash if it reveals a Windows drive letter (C:/...).
     if db_path.startswith("/") and len(db_path) >= 3 and db_path[2] == ":":
         db_path = db_path[1:]
-    # On POSIX relative paths, strip the leading slash too.
-    elif db_path.startswith("/") and not os.path.isabs(db_path):
+    # SQLite relative-path URLs (e.g. ///./data/file.db) produce a path
+    # starting with "/" but the second segment is "." or ".." — strip the
+    # leading slash to convert to a real relative path.
+    elif db_path.startswith("/.") or (db_path.startswith("/") and not os.path.isabs(db_path)):
         db_path = db_path[1:]
     parent = Path(db_path).parent
     if parent and not parent.exists():

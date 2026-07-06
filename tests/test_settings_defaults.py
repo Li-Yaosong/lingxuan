@@ -69,7 +69,7 @@ def test_no_duplicate_keys() -> None:
 # ── New keys (v2) ───────────────────────────────────────────────────────
 
 NEW_DEFAULTS: dict[str, object] = {
-    "DB_URL": "sqlite+aiosqlite:///data/lingxuan.db",
+    "DB_URL": "sqlite+aiosqlite:///./data/lingxuan.db",
     "DATA_ROOT": "./data",
     "AUTO_MIGRATE": True,
     "ADMIN_HOST": "127.0.0.1",

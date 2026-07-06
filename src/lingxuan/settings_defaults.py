@@ -92,9 +92,9 @@ SETTINGS: list[SettingSpec] = [
     SettingSpec("USER_COGNITION_MAX_CHARS", "int", 150, "user_memory",
                 description="Max chars for cognition summary output"),
     # ── storage ──────────────────────────────────────────────────────────
-    SettingSpec("DB_URL", "str", "sqlite+aiosqlite:///data/lingxuan.db", "storage",
+    SettingSpec("DB_URL", "str", "sqlite+aiosqlite:///./data/lingxuan.db", "storage",
                 hot_reloadable=False,
-                description="SQLAlchemy async database URL"),
+                description="SQLAlchemy async database URL (relative path under DATA_ROOT)"),
     SettingSpec("DATA_ROOT", "str", "./data", "storage",
                 hot_reloadable=False,
                 description="Root directory for data files"),
