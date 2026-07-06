@@ -5,6 +5,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
 import { dataApi, type UserProfileDetailResponse } from "../api/client";
 import ConfirmModal from "../components/ConfirmModal";
+import { formatTime, stageLabel } from "../utils/format";
 
 export default function UserDetailPage() {
   const { user } = useAuth();
@@ -57,9 +58,9 @@ export default function UserDetailPage() {
   if (error && !profile) {
     return (
       <>
-        <a className="back-link" onClick={() => navigate("/data/users")}>
+        <button type="button" className="back-link" onClick={() => navigate("/data/users")}>
           ← 返回用户列表
-        </a>
+        </button>
         <p className="form-error">{error}</p>
       </>
     );
@@ -195,30 +196,4 @@ export default function UserDetailPage() {
       />
     </>
   );
-}
-
-function stageLabel(stage: string): string {
-  const labels: Record<string, string> = {
-    stranger: "陌生",
-    acquaintance: "相识",
-    familiar: "熟悉",
-    close: "亲密",
-  };
-  return labels[stage] ?? stage;
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }

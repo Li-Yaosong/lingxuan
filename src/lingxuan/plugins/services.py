@@ -7,7 +7,7 @@ without depending on concrete implementations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from lingxuan.protocols.config import ConfigProvider
@@ -95,17 +95,17 @@ class PluginServices:
     @property
     def sessions(self) -> ReadOnlySessionRepo:
         """Read-only session data access."""
-        return self._sessions  # type: ignore[return-value]
+        return cast(ReadOnlySessionRepo, self._sessions)
 
     @property
     def user_profiles(self) -> ReadOnlyUserProfile:
         """Read-only user profile access."""
-        return self._user_profiles  # type: ignore[return-value]
+        return cast(ReadOnlyUserProfile, self._user_profiles)
 
     @property
     def social_graph(self) -> ReadOnlySocialGraph:
         """Read-only social graph access."""
-        return self._social_graph  # type: ignore[return-value]
+        return cast(ReadOnlySocialGraph, self._social_graph)
 
     @property
     def user_memory(self) -> UserMemoryService:

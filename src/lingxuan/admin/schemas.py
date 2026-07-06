@@ -239,12 +239,6 @@ class ImportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class PluginHookItem(BaseModel):
-    """One hook subscription of a plugin."""
-
-    name: str
-
-
 class PluginItem(BaseModel):
     """Plugin info returned by GET /plugins."""
 

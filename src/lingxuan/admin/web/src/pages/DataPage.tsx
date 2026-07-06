@@ -3,14 +3,9 @@
 import { useState, useEffect, useCallback, useRef, type ChangeEvent } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
-import {
-  dataApi,
-  type SessionItem,
-  type UserProfileItem,
-  type SocialGraphResponse,
-  type ImportResponse,
-} from "../api/client";
+import { dataApi, type SessionItem, type UserProfileItem, type SocialGraphResponse, type ImportResponse } from "../api/client";
 import ConfirmModal from "../components/ConfirmModal";
+import { formatTime, stageLabel } from "../utils/format";
 
 // ── Main page shell ─────────────────────────────────────────────────────
 
@@ -642,30 +637,3 @@ export function DataSocialGraphTab() {
   );
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────
-
-function formatTime(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function stageLabel(stage: string): string {
-  const labels: Record<string, string> = {
-    stranger: "陌生",
-    acquaintance: "相识",
-    familiar: "熟悉",
-    close: "亲密",
-  };
-  return labels[stage] ?? stage;
-}

@@ -13,14 +13,8 @@ from __future__ import annotations
 import importlib
 import logging
 import pkgutil
-import sys
 from typing import TYPE_CHECKING, Any
-
-if sys.version_info >= (3, 12):
-    from importlib.metadata import entry_points as _entry_points
-else:
-    # Python 3.10/11: entry_points(group=...) is available from 3.10+
-    from importlib.metadata import entry_points as _entry_points
+from importlib.metadata import entry_points as _entry_points
 
 from lingxuan.protocols.plugins import Plugin
 
@@ -122,6 +116,11 @@ class PluginLoader:
                 self._log.exception("Failed to extract plugin from module: %s", mod_name)
                 continue
             if plugin is not None:
+                if not hasattr(plugin, "name") or not hasattr(plugin, "version"):
+                    self._log.warning(
+                        "Built-in module %s 'plugin' missing name/version; skipping", mod_name,
+                    )
+                    continue
                 results.append(plugin)
             else:
                 self._log.warning("Built-in module %s exposes no 'plugin' or 'get_plugin()'; skipping", mod_name)

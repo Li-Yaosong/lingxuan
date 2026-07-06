@@ -3,12 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/context";
-import {
-  dataApi,
-  type MessageItem,
-  type SessionSummaryResponse,
-} from "../api/client";
+import { dataApi, type MessageItem, type SessionSummaryResponse } from "../api/client";
 import ConfirmModal from "../components/ConfirmModal";
+import { formatTime } from "../utils/format";
 
 export default function SessionDetailPage() {
   const { user } = useAuth();
@@ -79,9 +76,9 @@ export default function SessionDetailPage() {
 
   return (
     <>
-      <a className="back-link" onClick={() => navigate("/data")}>
+      <button type="button" className="back-link" onClick={() => navigate("/data")}>
         ← 返回会话列表
-      </a>
+      </button>
 
       {error && <p className="form-error">{error}</p>}
 
@@ -210,20 +207,4 @@ function roleClass(role: string): string {
   if (role === "user") return "role-user";
   if (role === "assistant") return "role-assistant";
   return "role-system";
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }

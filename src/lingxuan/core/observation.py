@@ -343,6 +343,11 @@ class ObservationService:
         )
         self._store.append_entry(group_id, obs_entry)
 
+        # Warm nickname cache for @'d users so nickname_for() resolves them
+        # even if they haven't spoken yet in this group.
+        for uid in obs_entry.at_user_ids:
+            self._store.remember_nickname(group_id, uid, str(uid))
+
         # Write user message to session memory
         session_id = SessionId(kind="group", peer_id=group_id)
         nickname = inbound.actor.nickname or str(inbound.actor.user_id)

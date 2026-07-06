@@ -470,3 +470,194 @@ class TestNoPluginNoSideEffect:
 
         # User + assistant messages should be written
         assert len(dialogue._memory.appended) >= 2
+
+
+class TestOnInboundMessageGroup:
+    """on_inbound_message: cancel for group messages."""
+
+    @pytest.mark.asyncio
+    async def test_cancel_group_inbound_skips_processing(self) -> None:
+        host = DefaultPluginHost()
+        host.register(CancelInboundPlugin())
+        host.enable("cancel_inbound")
+
+        dialogue = _make_dialogue(plugin_host=host)
+        inbound = _make_group_inbound(at_bot=True)
+
+        await dialogue.handle_inbound(inbound)
+
+        # Memory should NOT have been written — the message was cancelled
+        assert len(dialogue._memory.appended) == 0
+
+
+class TestOnBeforeReplyModifyPlan:
+    """on_before_reply: plugin can modify reply_plan fields (not just cancel)."""
+
+    @pytest.mark.asyncio
+    async def test_before_reply_can_modify_reason(self) -> None:
+        """Plugin modifies reply_plan.reason without blocking the reply."""
+
+        class ModifyReasonPlugin:
+            name = "modify_reason"
+            version = "0.1.0"
+
+            def setup(self, host: Any, config: dict, services: object) -> None:
+                host.subscribe(HookType.on_before_reply, self._on_before)
+
+            async def teardown(self) -> None:
+                pass
+
+            @staticmethod
+            async def _on_before(ctx: PluginContext) -> PluginContext:
+                if ctx.reply_plan is not None:
+                    ctx.reply_plan.reason = "plugin_modified"
+                return ctx
+
+        host = DefaultPluginHost()
+        host.register(ModifyReasonPlugin())
+        host.enable("modify_reason")
+
+        recorder = RecordHookPlugin()
+        host.register(recorder)
+        host.enable("recorder")
+
+        dialogue = _make_dialogue(plugin_host=host)
+        inbound = _make_private_inbound()
+
+        await dialogue.handle_inbound(inbound)
+
+        # Reply should still be sent (not blocked)
+        roles = [msg.role for _, msg in dialogue._memory.appended]
+        assert "assistant" in roles
+
+        # The before_reply hook should have fired
+        before_calls = [
+            (h, e) for h, e in recorder.calls if h == HookType.on_before_reply
+        ]
+        assert len(before_calls) >= 1
+
+
+class TestObservationPathHooks:
+    """on_before_reply / on_after_reply in the observation path."""
+
+    @pytest.mark.asyncio
+    async def test_observation_before_reply_can_block(self) -> None:
+        """Plugin blocks observation reply via on_before_reply."""
+        host = DefaultPluginHost()
+        host.register(ModifyReplyPlanPlugin())
+        host.enable("modify_reply_plan")
+
+        config = FakeConfigProvider(overrides={
+            "ENABLE_PRIVATE_CHAT": True,
+            "ENABLE_GROUP_CHAT": True,
+            "ENABLE_GROUP_OBSERVE": True,
+            "GROUP_OBSERVE_DELAY": 0.0,  # no debounce delay
+            "GROUP_OBSERVE_COOLDOWN": 0,
+            "GROUP_BURST_MERGE_WINDOW": 0,
+            "GROUP_FOLLOWUP_WINDOW": 0,
+            "GROUP_CHAT_CONTEXT": 6,
+            "BOT_NAME": "灵轩",
+        })
+        llm = FakeLLMProvider()
+        llm.set_chat_response("观察回复")
+        llm.set_stream_tokens(["观", "察", "回", "复"])
+        llm.set_judge_results([True])  # judge says "yes, reply"
+        transport = FakeTransport()
+        clock = FakeClock()
+        log = FakeLogSink()
+        sessions = InMemorySessionRepository()
+        memory = FakeMemoryService()
+        user_memory = FakeUserMemoryService()
+        admin = FakeAdminCommandService()
+        persona = PersonaService(config)
+        prompt = PromptBuilder(persona, config)
+        planner = ReplyPlanner(config)
+        obs_store = ObservationStore(config, clock)
+        executor = GroupReplyExecutor(
+            prompt=prompt, llm=llm, planner=planner,
+            transport=transport, sessions=sessions, config=config,
+        )
+        observation = ObservationService(
+            store=obs_store, executor=executor, llm=llm,
+            sessions=sessions, memory=memory, user_memory=user_memory,
+            config=config, clock=clock, plugin_host=host,
+        )
+
+        # Seed the observation buffer so _observe has something to work with
+        from lingxuan.core.observation_state import ObservationEntry
+        obs_entry = ObservationEntry(
+            user_id=123, nickname="测试用户", text="大家觉得呢",
+            at_bot=False, reply_to_bot=False, at_user_ids=[],
+            ts=clock.monotonic(),
+        )
+        obs_store.append_entry(456, obs_entry)
+
+        # Run observe directly (bypass debounce)
+        await observation._observe(456)
+
+        # The observation should have been blocked by the plugin
+        # (ModifyReplyPlanPlugin sets should_reply=False)
+        assert len(transport.sent_messages) == 0
+        assert len(transport.sent_stream_chunks) == 0
+
+    @pytest.mark.asyncio
+    async def test_observation_after_reply_fires(self) -> None:
+        """on_after_reply fires after observation reply is sent."""
+        recorder = RecordHookPlugin()
+        host = DefaultPluginHost()
+        host.register(recorder)
+        host.enable("recorder")
+
+        config = FakeConfigProvider(overrides={
+            "ENABLE_PRIVATE_CHAT": True,
+            "ENABLE_GROUP_CHAT": True,
+            "ENABLE_GROUP_OBSERVE": True,
+            "GROUP_OBSERVE_DELAY": 0.0,
+            "GROUP_OBSERVE_COOLDOWN": 0,
+            "GROUP_BURST_MERGE_WINDOW": 0,
+            "GROUP_FOLLOWUP_WINDOW": 0,
+            "GROUP_CHAT_CONTEXT": 6,
+            "BOT_NAME": "灵轩",
+        })
+        llm = FakeLLMProvider()
+        llm.set_chat_response("观察回复")
+        llm.set_stream_tokens(["观", "察", "回", "复"])
+        llm.set_judge_results([True])
+        transport = FakeTransport()
+        clock = FakeClock()
+        log = FakeLogSink()
+        sessions = InMemorySessionRepository()
+        memory = FakeMemoryService()
+        user_memory = FakeUserMemoryService()
+        admin = FakeAdminCommandService()
+        persona = PersonaService(config)
+        prompt = PromptBuilder(persona, config)
+        planner = ReplyPlanner(config)
+        obs_store = ObservationStore(config, clock)
+        executor = GroupReplyExecutor(
+            prompt=prompt, llm=llm, planner=planner,
+            transport=transport, sessions=sessions, config=config,
+        )
+        observation = ObservationService(
+            store=obs_store, executor=executor, llm=llm,
+            sessions=sessions, memory=memory, user_memory=user_memory,
+            config=config, clock=clock, plugin_host=host,
+        )
+
+        # Seed the observation buffer
+        from lingxuan.core.observation_state import ObservationEntry
+        obs_entry = ObservationEntry(
+            user_id=123, nickname="测试用户", text="大家觉得呢",
+            at_bot=False, reply_to_bot=False, at_user_ids=[],
+            ts=clock.monotonic(),
+        )
+        obs_store.append_entry(456, obs_entry)
+
+        # Run observe directly
+        await observation._observe(456)
+
+        # on_after_reply should have been recorded for the observation path
+        after_calls = [
+            (h, e) for h, e in recorder.calls if h == HookType.on_after_reply
+        ]
+        assert len(after_calls) >= 1

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../auth/context";
 import { auditApi, type AuditEntryItem } from "../api/client";
+import { formatTime } from "../utils/format";
 
 const ACTION_OPTIONS = [
   { value: "", label: "全部操作" },
@@ -146,7 +147,7 @@ export default function AuditPage() {
             ) : (
               entries.map((e) => (
                 <tr key={e.id}>
-                  <td>{formatTime(e.created_at)}</td>
+                  <td>{formatTime(e.created_at, true)}</td>
                   <td>{e.actor}</td>
                   <td>{e.action}</td>
                   <td>{e.target || "—"}</td>
@@ -203,21 +204,4 @@ export default function AuditPage() {
       </div>
     </div>
   );
-}
-
-function formatTime(iso: string): string {
-  if (!iso) return "—";
-  try {
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleString("zh-CN", {
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }
