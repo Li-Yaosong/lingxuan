@@ -104,13 +104,6 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
     napcat_dir = Path(config.get_str("NAPCAT_DIR"))
     qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    # Expand relative paths
-    data_root = Path(config.get_str("DATA_ROOT"))
-    if not napcat_dir.is_absolute():
-        napcat_dir = data_root / napcat_dir
-    if not qq_dir.is_absolute():
-        qq_dir = data_root / qq_dir
-
     manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
 
     if manager.is_running():
