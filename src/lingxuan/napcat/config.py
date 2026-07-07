@@ -51,18 +51,24 @@ def generate_onebot11_config(ws_url: str) -> dict:
     }
 
 
-def generate_webui_config(*, disable: bool = True) -> dict:
+def generate_webui_config(
+    *, disable: bool = True, auto_login_account: str = ""
+) -> dict:
     """Generate a NapCat webui.json config dict.
 
     When ``disable=True``, the WebUI is turned off for headless operation.
-    Login is via console QR code instead.
+    Login is via console QR code or auto-login instead.
+
+    ``auto_login_account`` sets the QQ number for NapCat's quick-login
+    on startup.  The QQ session must have been established by a prior
+    QR-code scan on this machine.
     """
     return {
         "host": "::",
         "port": 6099,
         "token": "",
         "loginRate": 10,
-        "autoLoginAccount": "",
+        "autoLoginAccount": auto_login_account,
         "theme": {},
         "disableWebUI": disable,
         "accessControlMode": "none",

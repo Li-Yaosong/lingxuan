@@ -21,6 +21,7 @@ from nonebot.adapters.onebot.v11 import (
     PrivateMessageEvent,
 )
 
+from lingxuan.adapters.onebot.mapping import _is_qq_system_message
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.logging import LogSink
 from lingxuan.protocols.messaging import (
@@ -104,6 +105,9 @@ class OneBotTransport:
                 return
             # Skip self messages (aligned with MVP)
             if event.user_id == event.self_id:
+                return
+            # Skip QQ system messages (群收款/红包/转账等)
+            if _is_qq_system_message(event):
                 return
             inbound = await self._map_group(event)
             # Guard: skip truly empty non-at messages

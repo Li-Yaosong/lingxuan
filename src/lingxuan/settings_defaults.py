@@ -128,6 +128,8 @@ SETTINGS: list[SettingSpec] = [
     SettingSpec("NAPCAT_AUTO_START", "bool", False, "napcat",
                 hot_reloadable=False,
                 description="Auto-start NapCat when lingxuan runs"),
+    SettingSpec("NAPCAT_QUICK_ACCOUNT", "str", "", "napcat",
+                description="QQ account for NapCat quick-login on startup; requires prior QR-code scan"),
 ]
 
 SETTINGS_BY_KEY: dict[str, SettingSpec] = {s.key: s for s in SETTINGS}

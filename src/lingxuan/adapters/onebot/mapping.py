@@ -7,6 +7,8 @@ No business orchestration, no message sending — only mapping.
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -26,6 +28,30 @@ from lingxuan.protocols.messaging import (
     ReplyTarget,
     SessionId,
 )
+
+_logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# QQ system message detection constants
+# ---------------------------------------------------------------------------
+
+# QQ 系统功能提示的文本特征（出现在 text 段内容中）
+_QQ_SYSTEM_PATTERNS: tuple[str, ...] = (
+    "[收钱]", "[转账]", "[红包]", "[群收款]", "[群转账]",
+    "[QQ红包]", "[一起嗨]", "[一起看]", "[签到]",
+)
+
+# 系统消息常见的消息段类型（出现这些段表示非纯人工输入）
+_SYSTEM_SEGMENT_TYPES: frozenset[str] = frozenset({
+    "json",    # 群收款/红包/转账/小程序 — 结构化富文本
+    "xml",     # 旧版 QQ 系统通知
+    "rich",    # NapCat 非标准富文本段
+    "contact", # 名片分享
+    "forward", # 合并转发
+    "share",   # 链接分享
+    "music",   # 音乐分享
+    "location",# 位置分享
+})
 
 
 # ---------------------------------------------------------------------------
@@ -92,14 +118,20 @@ def to_inbound_group(
     bot_admins = config.get_int_list("BOT_ADMINS")
     is_self = user_id == self_id
 
+    # Early detection: QQ system messages should be filtered out
+    is_system = _is_qq_system_message(event)
+    if is_system:
+        _logger.debug("过滤QQ系统消息: group=%s user=%s", group_id, user_id)
+
     at_bot = _is_at_bot(event, self_id)
     reply_to_bot = _is_reply_bot(event, self_id)
     at_user_ids = _parse_at_user_ids(event, self_id)
-    text = _strip_at_text(event, self_id)
+    # System messages: empty text so transport guard will skip them
+    text = "" if is_system else _strip_at_text(event, self_id)
 
     # Optional: pre-parse admin command
     command: tuple[str, list[str]] | None = None
-    if user_id in bot_admins and not is_self:
+    if user_id in bot_admins and not is_self and not is_system:
         command = _try_parse_command(text, config)
 
     return InboundMessage(
@@ -285,3 +317,42 @@ def _try_parse_command(
     }
     cmd = aliases.get(cmd, cmd)
     return cmd, args
+
+
+# ---------------------------------------------------------------------------
+# QQ system message detection
+# ---------------------------------------------------------------------------
+
+
+def _is_qq_system_message(event: GroupMessageEvent) -> bool:
+    """Detect QQ system notification messages the bot should ignore.
+
+    Covers 群收款, 红包, 转账, link shares, etc.
+
+    Detection strategy:
+    1. Text pattern: text segment contains QQ system markers like [收钱], [红包]
+    2. Segment type: message contains json/xml/rich/etc segments AND no
+       meaningful user text — the bot cannot view or act on these.
+    """
+    # Strategy 1: text content matches known system patterns
+    for seg in event.message:
+        if seg.type == "text":
+            text = seg.data.get("text", "")
+            if any(pattern in text for pattern in _QQ_SYSTEM_PATTERNS):
+                return True
+
+    # Strategy 2: system segment types + non-actionable text
+    has_system_segment = any(
+        seg.type in _SYSTEM_SEGMENT_TYPES for seg in event.message
+    )
+    if has_system_segment:
+        user_text = "".join(
+            seg.data.get("text", "")
+            for seg in event.message
+            if seg.type == "text"
+        ).strip()
+        # System segment + very short text or "请到手机QQ" hint → system message
+        if len(user_text) <= 10 or "请到手机QQ" in user_text:
+            return True
+
+    return False

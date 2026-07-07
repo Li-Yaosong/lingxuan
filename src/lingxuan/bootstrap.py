@@ -105,8 +105,11 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
     napcat_dir = Path(config.get_str("NAPCAT_DIR"))
     qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    # Make NAPCAT_WS_URL available to the manager's _ensure_onebot11_configs
+    # Make NapCat config available as env vars (manager reads these)
     os.environ.setdefault("NAPCAT_WS_URL", config.get_str("NAPCAT_WS_URL"))
+    quick_account = config.get_str("NAPCAT_QUICK_ACCOUNT")
+    if quick_account:
+        os.environ.setdefault("NAPCAT_QUICK_ACCOUNT", quick_account)
 
     manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
 
@@ -116,7 +119,10 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
 
     try:
         manager.start(foreground=False)
-        nonebot.logger.info("NapCat 自动启动成功")
+        if quick_account:
+            nonebot.logger.info("NapCat 自动启动成功 (快速登录: {})", quick_account)
+        else:
+            nonebot.logger.info("NapCat 自动启动成功 (需扫码登录)")
     except Exception as exc:
         nonebot.logger.warning("NapCat 自动启动失败: {}", exc)
 

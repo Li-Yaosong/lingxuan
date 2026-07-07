@@ -200,6 +200,17 @@ class NapCatManager:
         env["LD_PRELOAD"] = str(launcher_so.resolve())
         env["NAPCAT_WORKDIR"] = str(self._napcat_dir.resolve())
 
+        # Auto-login: determine the QQ account for quick-login.
+        # Priority: NAPCAT_QUICK_ACCOUNT env var > autoLoginAccount from webui.json.
+        # This works even when WebUI is disabled (unlike webui.json's
+        # autoLoginAccount which only takes effect through WebUI's quick function).
+        # Requires a prior QR-code scan on this machine to cache the session.
+        auto_account = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        if not auto_account:
+            auto_account = self._read_auto_login_account()
+        if auto_account:
+            env["NAPCAT_QUICK_ACCOUNT"] = auto_account
+
         # NAPCAT_BOOTMAIN tells loadNapCat.js where to find napcat.mjs.
         # Without this, it resolves ./napcat/napcat.mjs relative to the
         # project root (where the top-level loadNapCat.js lives), which
@@ -210,16 +221,21 @@ class NapCatManager:
         if napcat_shell.is_dir():
             env["NAPCAT_BOOTMAIN"] = str(napcat_shell.resolve())
 
+        # Build command line: QQ --no-sandbox [-q <account>] for quick-login.
+        qq_args = [str(qq_bin), "--no-sandbox"]
+        if auto_account:
+            qq_args.extend(["-q", auto_account])
+
         if foreground:
             self._qq_proc = subprocess.Popen(
-                [str(qq_bin), "--no-sandbox"],
+                qq_args,
                 env=env,
             )
         else:
             log_path = self._logs_dir / f"napcat-{int(time.time())}.log"
             log_file = open(log_path, "w", encoding="utf-8")
             self._qq_proc = subprocess.Popen(
-                [str(qq_bin), "--no-sandbox"],
+                qq_args,
                 env=env,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -251,6 +267,10 @@ class NapCatManager:
         ``websocketClients`` array.  Without the WS client config, NapCat
         won't connect back to lingxuan.  We re-inject the config on every
         start to keep it in sync.
+
+        Also patches ``webui.json`` to set ``autoLoginAccount`` when
+        ``NAPCAT_QUICK_ACCOUNT`` is configured, so NapCat can auto-login
+        via the WebUI quick function even when WebUI itself is disabled.
         """
         import json
 
@@ -279,6 +299,42 @@ class NapCatManager:
                     json.dumps(existing, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
+
+        # Also patch webui.json to set autoLoginAccount for quick-login
+        auto_account = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        if auto_account:
+            webui_path = config_dir / "webui.json"
+            if webui_path.exists():
+                try:
+                    webui = json.loads(webui_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    return
+                if webui.get("autoLoginAccount", "") != auto_account:
+                    webui["autoLoginAccount"] = auto_account
+                    webui_path.write_text(
+                        json.dumps(webui, indent=2, ensure_ascii=False),
+                        encoding="utf-8",
+                    )
+
+    def _read_auto_login_account(self) -> str:
+        """Read autoLoginAccount from webui.json or NAPCAT_QUICK_ACCOUNT env."""
+        import json
+
+        # Env var is highest priority
+        env_val = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        if env_val:
+            return env_val
+
+        # Read from webui.json
+        webui_path = self._napcat_dir / "config" / "webui.json"
+        if webui_path.exists():
+            try:
+                webui = json.loads(webui_path.read_text(encoding="utf-8"))
+                return webui.get("autoLoginAccount", "").strip()
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        return ""
 
     def _read_pid(self) -> int | None:
         """Read the PID from the PID file."""

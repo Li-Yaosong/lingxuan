@@ -16,6 +16,7 @@ import pytest
 from lingxuan.adapters.onebot.mapping import (
     SendInstruction,
     _is_at_bot,
+    _is_qq_system_message,
     _is_reply_bot,
     _parse_at_user_ids,
     _strip_at_text,
@@ -756,3 +757,211 @@ class TestOutboundToSendInstructions:
         assert "[CQ:at" in str(instructions[0].message)
         assert "[CQ:at" not in str(instructions[1].message)
         assert "[CQ:at" not in str(instructions[2].message)
+
+
+# ---------------------------------------------------------------------------
+# _is_qq_system_message
+# ---------------------------------------------------------------------------
+
+
+class TestIsQqSystemMessage:
+    def test_collection_text_only(self) -> None:
+        """纯文本群收款消息应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[收钱]你有一笔账单，请到手机QQ7.5.5及以上版本查看。"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_red_packet_text(self) -> None:
+        """红包文本应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[红包]请使用手机QQ查看"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_transfer_text(self) -> None:
+        """转账消息应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[转账]请你确认收款"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_group_collection_variant(self) -> None:
+        """群收款变体 [群收款] 应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[群收款]待支付"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_qq_red_packet_variant(self) -> None:
+        """QQ红包变体 [QQ红包] 应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[QQ红包]恭喜发财"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_json_segment_with_short_text(self) -> None:
+        """json 段 + 短文本应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("json", {"data": '{"prompt":"[群收款]"}'}),
+            FakeMessageSegment("text", {"text": "账单"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_json_segment_with_phone_hint(self) -> None:
+        """json 段 + '请到手机QQ' 提示应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("json", {"data": '{"prompt":"收款"}'}),
+            FakeMessageSegment("text", {"text": "请到手机QQ查看详情"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_xml_segment_with_short_text(self) -> None:
+        """xml 段 + 短文本应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("xml", {"data": "<msg>...</msg>"}),
+            FakeMessageSegment("text", {"text": "通知"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_rich_segment(self) -> None:
+        """rich 段应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("rich", {"data": "..."}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_contact_segment(self) -> None:
+        """contact 段（名片分享）应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("contact", {"type": "qq", "id": "12345"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_share_segment(self) -> None:
+        """share 段（链接分享）应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("share", {"url": "https://example.com", "title": "链接"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_forward_segment(self) -> None:
+        """forward 段（合并转发）应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("forward", {"id": "123456"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_normal_text_not_filtered(self) -> None:
+        """普通用户消息不应被误判。"""
+        msg = FakeMessage([FakeMessageSegment("text", {"text": "你好灵轩"})])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_bracket_in_normal_text(self) -> None:
+        """包含方括号但非系统特征的消息不应被误判。"""
+        msg = FakeMessage([FakeMessageSegment("text", {"text": "这个[测试]消息"})])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_image_plus_text_not_filtered(self) -> None:
+        """image 段 + 文本不应被误判。"""
+        msg = FakeMessage([
+            FakeMessageSegment("image", {"file": "test.jpg"}),
+            FakeMessageSegment("text", {"text": "看这个图片"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_face_plus_text_not_filtered(self) -> None:
+        """face 段 + 文本不应被误判。"""
+        msg = FakeMessage([
+            FakeMessageSegment("face", {"id": "178"}),
+            FakeMessageSegment("text", {"text": "哈哈"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_reply_plus_text_not_filtered(self) -> None:
+        """reply 段 + 文本不应被误判。"""
+        msg = FakeMessage([
+            FakeMessageSegment("reply", {"id": "123"}),
+            FakeMessageSegment("text", {"text": "我同意"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_json_segment_with_meaningful_text(self) -> None:
+        """json 段 + 有意义的用户文本不应被误判。"""
+        msg = FakeMessage([
+            FakeMessageSegment("json", {"data": '{"prompt":"小程序"}'}),
+            FakeMessageSegment("text", {"text": "大家看看这个小程序怎么样？我觉得挺好用的"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is False
+
+    def test_music_segment(self) -> None:
+        """music 段应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("music", {"type": "custom", "id": "0"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+    def test_location_segment(self) -> None:
+        """location 段应被识别。"""
+        msg = FakeMessage([
+            FakeMessageSegment("location", {"lat": "39.9", "lon": "116.4"}),
+        ])
+        event = FakeGroupEvent(message=msg)
+        assert _is_qq_system_message(event) is True
+
+
+# ---------------------------------------------------------------------------
+# _is_qq_system_message — integration with to_inbound_group
+# ---------------------------------------------------------------------------
+
+
+class TestSystemMessageInboundGroup:
+    """Verify that system messages produce empty-text InboundMessage."""
+
+    def test_collection_text_emptied(self, config_no_admin: FakeConfigProvider) -> None:
+        """群收款消息映射后 text 为空，可被 transport guard 过滤。"""
+        msg = FakeMessage([
+            FakeMessageSegment("text", {"text": "[收钱]你有一笔账单，请到手机QQ7.5.5及以上版本查看。"}),
+        ])
+        event = FakeGroupEvent(
+            user_id=NORMAL_USER_ID,
+            group_id=12345,
+            self_id=BOT_SELF_ID,
+            message=msg,
+            sender=FakeSender(user_id=NORMAL_USER_ID, nickname="用户"),
+        )
+        result = to_inbound_group(event, self_id=BOT_SELF_ID, config=config_no_admin)
+        assert result.text == ""
+        assert result.at_bot is False
+
+    def test_normal_text_preserved(self, config_no_admin: FakeConfigProvider) -> None:
+        """普通消息映射后 text 正常保留。"""
+        msg = FakeMessage([FakeMessageSegment("text", {"text": "你好灵轩"})])
+        event = FakeGroupEvent(
+            user_id=NORMAL_USER_ID,
+            group_id=12345,
+            self_id=BOT_SELF_ID,
+            message=msg,
+            sender=FakeSender(user_id=NORMAL_USER_ID, nickname="用户"),
+        )
+        result = to_inbound_group(event, self_id=BOT_SELF_ID, config=config_no_admin)
+        assert result.text == "你好灵轩"
