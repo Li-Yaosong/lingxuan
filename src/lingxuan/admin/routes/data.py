@@ -456,7 +456,7 @@ async def export_data(
     raw_settings = await config_repo.get_all()
     safe_settings: dict[str, Any] = {}
     try:
-        from lingxuan.settings_defaults import SETTINGS_BY_KEY
+        from lingxuan.config.defaults import SETTINGS_BY_KEY
         for k, v in raw_settings.items():
             spec = SETTINGS_BY_KEY.get(k)
             if spec and spec.is_secret and isinstance(v, str) and v:
@@ -638,7 +638,7 @@ async def import_data(
     count = 0
     for k, v in data.settings.items():
         try:
-            from lingxuan.settings_defaults import SETTINGS_BY_KEY
+            from lingxuan.config.defaults import SETTINGS_BY_KEY
             spec = SETTINGS_BY_KEY.get(k)
             if spec and spec.is_secret:
                 continue

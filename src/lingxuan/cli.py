@@ -216,7 +216,7 @@ def _cmd_db_revision(args: argparse.Namespace) -> None:
 
 def _resolve_config_paths(args: argparse.Namespace) -> tuple[str, str]:
     """Return (db_url, data_root) from CLI overrides / env / defaults."""
-    from lingxuan.settings_defaults import SETTINGS_BY_KEY
+    from lingxuan.config.defaults import SETTINGS_BY_KEY
 
     db_url = args.db_url or os.environ.get(
         "DB_URL", str(SETTINGS_BY_KEY["DB_URL"].default)
@@ -225,6 +225,17 @@ def _resolve_config_paths(args: argparse.Namespace) -> tuple[str, str]:
         "DATA_ROOT", str(SETTINGS_BY_KEY["DATA_ROOT"].default)
     )
     return db_url, data_root
+
+
+def _build_cli_config(args: argparse.Namespace) -> "EnvConfigProvider":
+    """Build a lightweight EnvConfigProvider for CLI subcommands.
+
+    Uses env + defaults only (no DB repo) since CLI commands run
+    outside the full bootstrap lifecycle.
+    """
+    from lingxuan.adapters.config_provider import EnvConfigProvider
+
+    return EnvConfigProvider()
 
 
 def _cmd_backup(args: argparse.Namespace) -> None:
@@ -457,9 +468,10 @@ def _cmd_napcat_setup(args: argparse.Namespace) -> None:
     from lingxuan.napcat.installer import run_setup
 
     db_url, data_root = _resolve_config_paths(args)
-    napcat_dir = os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat"))
-    qq_dir = os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq"))
-    ws_url = os.environ.get("NAPCAT_WS_URL", "ws://127.0.0.1:8080/onebot/v11/ws")
+    config = _build_cli_config(args)
+    napcat_dir = config.get_str("NAPCAT_DIR")
+    qq_dir = config.get_str("NAPCAT_QQ_DIR")
+    ws_url = config.get_str("NAPCAT_WS_URL")
 
     run_setup(
         napcat_dir=Path(napcat_dir),
@@ -472,11 +484,11 @@ def _cmd_napcat_start(args: argparse.Namespace) -> None:
     """Start NapCat in the foreground (shows QR code for login)."""
     from lingxuan.napcat.manager import NapCatManager
 
-    db_url, data_root = _resolve_config_paths(args)
-    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
-    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+    config = _build_cli_config(args)
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
 
     try:
         manager.start(foreground=True)
@@ -495,11 +507,11 @@ def _cmd_napcat_stop(args: argparse.Namespace) -> None:
     """Stop the running NapCat process."""
     from lingxuan.napcat.manager import NapCatManager
 
-    db_url, data_root = _resolve_config_paths(args)
-    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
-    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+    config = _build_cli_config(args)
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
     manager.stop()
 
 
@@ -507,11 +519,11 @@ def _cmd_napcat_status(args: argparse.Namespace) -> None:
     """Check NapCat running status."""
     from lingxuan.napcat.manager import NapCatManager
 
-    db_url, data_root = _resolve_config_paths(args)
-    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
-    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+    config = _build_cli_config(args)
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
     info = manager.status()
 
     if info["running"]:
@@ -527,11 +539,11 @@ def _cmd_napcat_logs(args: argparse.Namespace) -> None:
     """Show recent NapCat logs."""
     from lingxuan.napcat.manager import NapCatManager
 
-    db_url, data_root = _resolve_config_paths(args)
-    napcat_dir = Path(os.environ.get("NAPCAT_DIR", os.path.join(data_root, "napcat")))
-    qq_dir = Path(os.environ.get("NAPCAT_QQ_DIR", os.path.join(data_root, "qq")))
+    config = _build_cli_config(args)
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
     print(manager.tail_logs(lines=100))
 
 

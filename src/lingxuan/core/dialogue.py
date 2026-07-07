@@ -21,7 +21,7 @@ from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
-from lingxuan.protocols.memory import MemoryService, UserMemoryService
+from lingxuan.protocols.repositories import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     InboundMessage,
     MessageTransport,

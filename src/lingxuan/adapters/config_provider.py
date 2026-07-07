@@ -15,9 +15,9 @@ from collections.abc import Callable
 
 from dotenv import load_dotenv
 
-from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe
+from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe, mask_secret
 from lingxuan.protocols.repositories import AuditRepository, ConfigRepository
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, mask_secret, parse_value
+from lingxuan.config.defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, parse_value
 
 
 class EnvConfigProvider:

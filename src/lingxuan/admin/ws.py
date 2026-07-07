@@ -24,8 +24,9 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from lingxuan.admin.auth import InvalidTokenError, decode_token
 from lingxuan.admin.deps import get_container
+from lingxuan.protocols.config import mask_secret
 from lingxuan.protocols.logging import LogRecord
-from lingxuan.settings_defaults import SETTINGS_BY_KEY, mask_secret
+from lingxuan.config.defaults import SETTINGS_BY_KEY
 
 router = APIRouter(tags=["ws"])
 

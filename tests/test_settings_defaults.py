@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, parse_value
+from lingxuan.config.defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, parse_value
 
 # ── 33 existing MVP keys with their expected defaults ───────────────────
 MVP_DEFAULTS: dict[str, object] = {

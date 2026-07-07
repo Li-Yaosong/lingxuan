@@ -15,9 +15,9 @@ if TYPE_CHECKING:
     from lingxuan.protocols.repositories import (
         SessionRepository,
         SocialGraphRepository,
+        UserMemoryService,
         UserProfileRepository,
     )
-    from lingxuan.protocols.memory import UserMemoryService
 
 
 # ---------------------------------------------------------------------------

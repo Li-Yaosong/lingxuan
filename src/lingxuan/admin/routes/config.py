@@ -16,7 +16,8 @@ from lingxuan.admin.schemas import (
     ConfigUpdateResponse,
     ConfigUpdateResultItem,
 )
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, mask_secret
+from lingxuan.protocols.config import mask_secret
+from lingxuan.config.defaults import SETTINGS, SETTINGS_BY_KEY
 
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -166,7 +167,7 @@ def _coerce_value(spec: Any, value: object) -> object:
 
     Raises ValueError/TypeError on incompatible values.
     """
-    from lingxuan.settings_defaults import parse_value
+    from lingxuan.config.defaults import parse_value
 
     target = spec.type
 

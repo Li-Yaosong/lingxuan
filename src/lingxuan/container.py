@@ -45,20 +45,20 @@ from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
 from lingxuan.protocols.logging import LogSink
-from lingxuan.protocols.memory import MemoryService as MemoryServiceProtocol
-from lingxuan.protocols.memory import UserMemoryService as UserMemoryServiceProtocol
-from lingxuan.protocols.messaging import MessageTransport, SessionId
-from lingxuan.protocols.plugins import HookType, PluginContext
 from lingxuan.protocols.repositories import (
     AdminUserRepository,
     AuditRepository,
     ConfigRepository,
+    MemoryService as MemoryServiceProtocol,
+    UserMemoryService as UserMemoryServiceProtocol,
     PluginConfigRepository,
     SessionRepository,
     SocialGraphRepository,
     StoredMessage,
     UserProfileRepository,
 )
+from lingxuan.protocols.messaging import MessageTransport, SessionId
+from lingxuan.protocols.plugins import HookType, PluginContext
 
 if TYPE_CHECKING:
     from lingxuan.core.dialogue import DialogueService

@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from lingxuan.adapters.config_provider import EnvConfigProvider
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY
+from lingxuan.config.defaults import SETTINGS, SETTINGS_BY_KEY
 
 
 # ---------------------------------------------------------------------------

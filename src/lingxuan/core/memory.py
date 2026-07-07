@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from lingxuan.protocols.clock import Clock
     from lingxuan.protocols.config import ConfigProvider
     from lingxuan.protocols.logging import LogSink
-    from lingxuan.protocols.memory import UserMemoryService
+    from lingxuan.protocols.repositories import UserMemoryService
     from lingxuan.protocols.messaging import SessionId
 
 

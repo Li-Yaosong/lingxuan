@@ -938,7 +938,7 @@ class SqlConfigRepository:
         group_name: str | None = None
         is_secret = False
         try:
-            from lingxuan.settings_defaults import SETTINGS_BY_KEY
+            from lingxuan.config.defaults import SETTINGS_BY_KEY
 
             spec = SETTINGS_BY_KEY.get(key)
             if spec is not None:
@@ -972,7 +972,7 @@ class SqlConfigRepository:
                 group_name: str | None = None
                 is_secret = False
                 try:
-                    from lingxuan.settings_defaults import SETTINGS_BY_KEY
+                    from lingxuan.config.defaults import SETTINGS_BY_KEY
 
                     spec = SETTINGS_BY_KEY.get(key)
                     if spec is not None:

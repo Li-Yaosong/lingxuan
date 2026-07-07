@@ -21,7 +21,7 @@ from lingxuan.core.prompting import PromptBuilder, build_judge_prompt, should_sk
 from lingxuan.protocols.clock import Clock
 from lingxuan.protocols.config import ConfigProvider
 from lingxuan.protocols.llm import LLMProvider
-from lingxuan.protocols.memory import MemoryService, UserMemoryService
+from lingxuan.protocols.repositories import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     InboundMessage,
     ObservationEntry,
@@ -540,13 +540,6 @@ class ObservationService:
                     },
                 )
                 await self._plugin_host.dispatch(ctx)
-
-    def _format_entities_text(self, group_id: int, session_id: SessionId) -> str:
-        """Format group entities as context text.
-
-        # TODO(Phase 2): implement with SessionRepository.get_entities
-        """
-        return ""
 
 
 def _format_exchange(

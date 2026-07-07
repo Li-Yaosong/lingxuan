@@ -35,3 +35,8 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# SQLite runtime files (DB, WAL, shared memory)
+*.db
+*.db-shm
+*.db-wal

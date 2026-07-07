@@ -29,5 +29,10 @@ def test_import_adapters_logging() -> None:
     import lingxuan.adapters.logging
 
 
-def test_import_settings_defaults() -> None:
+def test_import_config_defaults() -> None:
+    import lingxuan.config.defaults
+
+
+def test_import_settings_defaults_compat() -> None:
+    """Backward-compat: lingxuan.settings_defaults still importable."""
     import lingxuan.settings_defaults

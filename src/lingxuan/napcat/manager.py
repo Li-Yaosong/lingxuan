@@ -32,15 +32,34 @@ class NapCatManager:
     Args:
         napcat_dir: NapCat installation directory (contains launcher.so, config/).
         qq_dir: LinuxQQ installation directory.
+        config: Optional ConfigProvider for reading NAPCAT_* settings.
+            When provided, ``NAPCAT_QUICK_ACCOUNT`` and ``NAPCAT_WS_URL``
+            are read from it; otherwise ``os.environ`` is used as fallback.
     """
 
-    def __init__(self, napcat_dir: Path, qq_dir: Path) -> None:
+    def __init__(
+        self,
+        napcat_dir: Path,
+        qq_dir: Path,
+        *,
+        config: "ConfigProvider | None" = None,
+    ) -> None:
         self._napcat_dir = napcat_dir
         self._qq_dir = qq_dir
+        self._config = config
         self._pid_file = napcat_dir / _PID_FILE
         self._logs_dir = napcat_dir / _LOGS_DIR
         self._xvfb_proc: subprocess.Popen | None = None
         self._qq_proc: subprocess.Popen | None = None
+
+    def _get_config_str(self, key: str, default: str = "") -> str:
+        """Read a config value, falling back to os.environ then default."""
+        if self._config is not None:
+            try:
+                return self._config.get_str(key)
+            except KeyError:
+                pass
+        return os.environ.get(key, default)
 
     # ── start ──────────────────────────────────────────────────────────
 
@@ -205,7 +224,7 @@ class NapCatManager:
         # This works even when WebUI is disabled (unlike webui.json's
         # autoLoginAccount which only takes effect through WebUI's quick function).
         # Requires a prior QR-code scan on this machine to cache the session.
-        auto_account = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        auto_account = self._get_config_str("NAPCAT_QUICK_ACCOUNT").strip()
         if not auto_account:
             auto_account = self._read_auto_login_account()
         if auto_account:
@@ -280,7 +299,7 @@ class NapCatManager:
         if not config_dir.is_dir():
             return
 
-        ws_url = os.environ.get("NAPCAT_WS_URL", "ws://127.0.0.1:8080/onebot/v11/ws")
+        ws_url = self._get_config_str("NAPCAT_WS_URL", "ws://127.0.0.1:8080/onebot/v11/ws")
         ws_config = generate_onebot11_config(ws_url)
 
         for config_file in config_dir.glob("onebot11_*.json"):
@@ -301,7 +320,7 @@ class NapCatManager:
                 )
 
         # Also patch webui.json to set autoLoginAccount for quick-login
-        auto_account = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        auto_account = self._get_config_str("NAPCAT_QUICK_ACCOUNT").strip()
         if auto_account:
             webui_path = config_dir / "webui.json"
             if webui_path.exists():
@@ -321,7 +340,7 @@ class NapCatManager:
         import json
 
         # Env var is highest priority
-        env_val = os.environ.get("NAPCAT_QUICK_ACCOUNT", "").strip()
+        env_val = self._get_config_str("NAPCAT_QUICK_ACCOUNT").strip()
         if env_val:
             return env_val
 
@@ -367,4 +386,4 @@ def build_manager_from_config(config: "ConfigProvider") -> NapCatManager:
     napcat_dir = Path(config.get_str("NAPCAT_DIR"))
     qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
 
-    return NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    return NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)

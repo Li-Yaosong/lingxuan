@@ -20,7 +20,7 @@ from lingxuan.core.persona import PersonaService
 from lingxuan.core.prompting import PromptBuilder
 from lingxuan.core.reply_planner import ReplyPlanner
 from lingxuan.protocols.llm import ChatMessage
-from lingxuan.protocols.memory import MemoryService, UserMemoryService
+from lingxuan.protocols.repositories import MemoryService, UserMemoryService
 from lingxuan.protocols.messaging import (
     Actor,
     InboundMessage,

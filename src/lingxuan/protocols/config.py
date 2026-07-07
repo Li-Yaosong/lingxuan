@@ -40,3 +40,17 @@ class ConfigProvider(Protocol):
     async def get_all(self, *, mask_secrets: bool = True) -> dict[str, object]: ...
 
     def subscribe(self, callback: ConfigChangeCallback) -> Unsubscribe: ...
+
+
+def mask_secret(value: str) -> str:
+    """Mask a secret value for display.
+
+    - Empty → "(未配置)"
+    - ≤4 chars → "****"
+    - Otherwise → first 2 + **** + last 2
+    """
+    if not value:
+        return "(未配置)"
+    if len(value) <= 4:
+        return "****"
+    return f"{value[:2]}****{value[-2:]}"

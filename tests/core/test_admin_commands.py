@@ -13,7 +13,7 @@ from lingxuan.core.admin_commands import (
     parse_command,
 )
 from lingxuan.protocols.messaging import ObservationEntry, SessionId
-from lingxuan.settings_defaults import mask_secret
+from lingxuan.protocols.config import mask_secret
 from tests.fakes.config import FakeConfigProvider
 
 

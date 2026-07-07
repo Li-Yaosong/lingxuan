@@ -12,9 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
-from lingxuan.protocols.config import ConfigProvider
+from lingxuan.protocols.config import ConfigProvider, mask_secret
 from lingxuan.protocols.messaging import SessionId
-from lingxuan.settings_defaults import mask_secret
 
 
 # ---------------------------------------------------------------------------

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe
-from lingxuan.settings_defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec, mask_secret
+from lingxuan.config.defaults import SETTINGS, SETTINGS_BY_KEY, SettingSpec
+from lingxuan.protocols.config import ConfigChangeCallback, Unsubscribe, mask_secret
 
 
 class FakeConfigProvider:
