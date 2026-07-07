@@ -79,6 +79,7 @@ def write_configs(config_dir: Path, ws_url: str) -> list[Path]:
 
     Creates:
     - ``onebot11_.json`` — default reverse WS config (empty QQ suffix)
+    - ``onebot11_<QQ>.json`` — updates any existing QQ-specific configs
     - ``webui.json`` — headless config (WebUI disabled)
 
     Returns list of written file paths.
@@ -94,6 +95,19 @@ def write_configs(config_dir: Path, ws_url: str) -> list[Path]:
         encoding="utf-8",
     )
     written.append(onebot11_path)
+
+    # Also write/update any existing QQ-specific onebot11_<QQ>.json files.
+    # NapCat creates these on first login with empty WS config, which breaks
+    # the reverse WebSocket connection to lingxuan.
+    ws_config = generate_onebot11_config(ws_url)
+    for existing in config_dir.glob("onebot11_*.json"):
+        if existing.name == "onebot11_.json":
+            continue
+        existing.write_text(
+            json.dumps(ws_config, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        written.append(existing)
 
     # webui config — disable WebUI for headless
     webui_path = config_dir / "webui.json"

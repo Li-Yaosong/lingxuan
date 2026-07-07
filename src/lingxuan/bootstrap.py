@@ -97,12 +97,16 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
 
     Non-fatal: if NapCat is already running or can't start, just log a warning.
     """
+    import os
     from pathlib import Path
 
     from lingxuan.napcat.manager import NapCatManager
 
     napcat_dir = Path(config.get_str("NAPCAT_DIR"))
     qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
+
+    # Make NAPCAT_WS_URL available to the manager's _ensure_onebot11_configs
+    os.environ.setdefault("NAPCAT_WS_URL", config.get_str("NAPCAT_WS_URL"))
 
     manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
 

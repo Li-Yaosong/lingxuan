@@ -190,6 +190,11 @@ class NapCatManager:
                 "找不到 QQ 可执行文件。请确认 LinuxQQ 已安装。"
             )
 
+        # Ensure all onebot11_*.json configs have the reverse WS client.
+        # NapCat creates onebot11_<QQ>.json on first login with empty WS config,
+        # which breaks the connection.  We patch them before every start.
+        self._ensure_onebot11_configs()
+
         env = os.environ.copy()
         env["DISPLAY"] = f":{_XVFB_DISPLAY}"
         env["LD_PRELOAD"] = str(launcher_so.resolve())
@@ -238,6 +243,42 @@ class NapCatManager:
                 return p
 
         return None
+
+    def _ensure_onebot11_configs(self) -> None:
+        """Patch all onebot11_*.json files to include the reverse WS client.
+
+        NapCat creates ``onebot11_<QQ>.json`` on first login with an empty
+        ``websocketClients`` array.  Without the WS client config, NapCat
+        won't connect back to lingxuan.  We re-inject the config on every
+        start to keep it in sync.
+        """
+        import json
+
+        from lingxuan.napcat.config import generate_onebot11_config
+
+        config_dir = self._napcat_dir / "config"
+        if not config_dir.is_dir():
+            return
+
+        ws_url = os.environ.get("NAPCAT_WS_URL", "ws://127.0.0.1:8080/onebot/v11/ws")
+        ws_config = generate_onebot11_config(ws_url)
+
+        for config_file in config_dir.glob("onebot11_*.json"):
+            try:
+                existing = json.loads(config_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            # Check if the WS client is already configured
+            clients = existing.get("network", {}).get("websocketClients", [])
+            has_lingxuan = any(c.get("name") == "lingxuan" for c in clients)
+
+            if not has_lingxuan:
+                existing["network"]["websocketClients"] = ws_config["network"]["websocketClients"]
+                config_file.write_text(
+                    json.dumps(existing, indent=2, ensure_ascii=False),
+                    encoding="utf-8",
+                )
 
     def _read_pid(self) -> int | None:
         """Read the PID from the PID file."""
