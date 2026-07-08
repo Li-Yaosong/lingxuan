@@ -80,7 +80,11 @@
 - `phase5/P5-07-spa-data-plugins.md` — 数据管理页 + 插件管理页
 
 ### Phase 6+（可选，本集暂不展开）
-受限终端、文件管理、PostgreSQL 适配、插件沙箱——按需再拆。
+受限终端、文件管理、PostgreSQL 适配、插件沙箱——已纳入 **v3 规划**，见 [`docs/architecture-v3.md`](../architecture-v3.md) 与 [`docs/prompts-v3/README.md`](../prompts-v3/README.md)。
+
+## v3 后续
+
+v2 提示词集（本目录 Phase 0–5）完成后，v3 任务将拆至 `docs/prompts-v3/`。请先阅读 `docs/architecture-v3.md` 了解 Phase 0–6+ 范围与优先级。
 
 ## 约定
 - 所有任务共享 `00-common-context.md` 的架构规则与 MVP 事实，任务文件里不再重复长背景。
