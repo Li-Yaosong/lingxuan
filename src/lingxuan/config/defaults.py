@@ -130,6 +130,12 @@ SETTINGS: list[SettingSpec] = [
                 description="Auto-start NapCat when lingxuan runs"),
     SettingSpec("NAPCAT_QUICK_ACCOUNT", "str", "", "napcat",
                 description="QQ account for NapCat quick-login on startup; requires prior QR-code scan"),
+    SettingSpec("NAPCAT_NO_SANDBOX", "bool", False, "napcat",
+                hot_reloadable=False,
+                description="Pass --no-sandbox to QQ; enable for Docker/headless, disable on desktop"),
+    SettingSpec("NAPCAT_USE_XVFB", "bool", True, "napcat",
+                hot_reloadable=False,
+                description="Start QQ on Xvfb virtual display; set false on desktop to show QQ window"),
 ]
 
 SETTINGS_BY_KEY: dict[str, SettingSpec] = {s.key: s for s in SETTINGS}

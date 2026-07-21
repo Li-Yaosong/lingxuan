@@ -136,6 +136,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     napcat_sub.add_parser("setup", help="Download and install NapCat + LinuxQQ")
     napcat_sub.add_parser("start", help="Start NapCat (foreground with QR code)")
+    napcat_sub.add_parser(
+        "login",
+        help="Open normal QQ window (often cannot reuse session for NapCat quick-login)",
+    )
     napcat_sub.add_parser("stop", help="Stop NapCat process")
     napcat_sub.add_parser("status", help="Check NapCat running status")
     napcat_sub.add_parser("logs", help="Show recent NapCat logs")
@@ -503,6 +507,32 @@ def _cmd_napcat_start(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_napcat_login(args: argparse.Namespace) -> None:
+    """Open a normal QQ GUI window for QR-code login (no NapCat injection)."""
+    from lingxuan.napcat.manager import NapCatManager
+
+    config = _build_cli_config(args)
+    napcat_dir = Path(config.get_str("NAPCAT_DIR"))
+    qq_dir = Path(config.get_str("NAPCAT_QQ_DIR"))
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
+
+    try:
+        manager.start_gui_login()
+        if manager._qq_proc is not None:
+            manager._qq_proc.wait()
+        manager._pid_file.unlink(missing_ok=True)
+        print()
+        print("✓ QQ 已退出。接下来请执行: lingxuan run")
+        print("  （会用缓存登录态快速登录并注入 NapCat）")
+    except KeyboardInterrupt:
+        print("\n→ 收到中断信号，关闭 QQ...")
+        manager.stop()
+    except RuntimeError as e:
+        print(f"✗ 启动失败: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 def _cmd_napcat_stop(args: argparse.Namespace) -> None:
     """Stop the running NapCat process."""
     from lingxuan.napcat.manager import NapCatManager
@@ -587,6 +617,8 @@ def dispatch(args: argparse.Namespace) -> None:
             _cmd_napcat_setup(args)
         elif napcat_cmd == "start":
             _cmd_napcat_start(args)
+        elif napcat_cmd == "login":
+            _cmd_napcat_login(args)
         elif napcat_cmd == "stop":
             _cmd_napcat_stop(args)
         elif napcat_cmd == "status":
@@ -594,7 +626,10 @@ def dispatch(args: argparse.Namespace) -> None:
         elif napcat_cmd == "logs":
             _cmd_napcat_logs(args)
         else:
-            print("用法: lingxuan napcat {setup|start|stop|status|logs}", file=sys.stderr)
+            print(
+                "用法: lingxuan napcat {setup|start|login|stop|status|logs}",
+                file=sys.stderr,
+            )
             sys.exit(1)
     else:
         print(f"未知子命令: {command}", file=sys.stderr)

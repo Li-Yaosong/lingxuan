@@ -28,6 +28,31 @@ from lingxuan.napcat.utils import (
 )
 
 
+# LinuxQQ .deb runtime dependencies (Debian/Ubuntu)
+_LINUXQQ_DEB_DEPS = [
+    "libgtk-3-0",
+    "libnotify4",
+    "libxss1",
+    "libxtst6",
+    "xdg-utils",
+    "libsecret-1-0",
+]
+
+_SYSTEM_QQ_BIN = Path("/opt/QQ/qq")
+
+
+def _run_privileged(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run a command as root, prefixing with sudo when needed."""
+    if os.geteuid() != 0:
+        cmd = ["sudo", *cmd]
+    return subprocess.run(cmd, check=True, capture_output=True)
+
+
+def _linuxqq_installed() -> bool:
+    """Return True when LinuxQQ is available on the system."""
+    return _SYSTEM_QQ_BIN.exists() or shutil.which("qq") is not None
+
+
 class SetupError(RuntimeError):
     """Raised when NapCat setup fails."""
 
@@ -125,8 +150,11 @@ def _download_napcat(napcat_dir: Path) -> None:
     # The zip puts napcat.mjs at the root level, but loadNapCat.js
     # expects it at ./napcat/napcat.mjs (relative to its own location).
     napcat_symlink = shell_dir / "napcat"
-    if not napcat_symlink.exists():
-        napcat_symlink.symlink_to(shell_dir)
+    if napcat_symlink.is_symlink() and napcat_symlink.resolve() == shell_dir.resolve():
+        print(f"  ✓ napcat/ 软链接: {napcat_symlink}")
+    else:
+        napcat_symlink.unlink(missing_ok=True)
+        napcat_symlink.symlink_to(".", target_is_directory=True)
         print(f"  ✓ 创建 napcat/ 软链接 → {shell_dir}")
 
 
@@ -140,12 +168,12 @@ def _install_linuxqq(qq_dir: Path) -> None:
     print("── Step 2/4: 安装 LinuxQQ ──")
 
     # Check if QQ is already installed system-wide
-    if shutil.which("qq") is not None:
+    if _linuxqq_installed():
         print("  ✓ 系统已安装 LinuxQQ")
         return
 
     # Check if we've already installed it locally
-    local_qq_bin = qq_dir / "usr / bin / qq"
+    local_qq_bin = qq_dir / "usr" / "bin" / "qq"
     local_qq_bin_clean = qq_dir / "bin" / "qq"
     if local_qq_bin_clean.exists() or local_qq_bin.exists():
         print("  ✓ 本地已安装 LinuxQQ")
@@ -162,27 +190,26 @@ def _install_linuxqq(qq_dir: Path) -> None:
     deb_path = qq_dir / "linuxqq.deb"
     download_file(url, deb_path, desc="LinuxQQ deb")
 
-    # Install with dpkg --instdir
+    # Install with apt when available so dependencies are resolved correctly.
     print("  → 安装 LinuxQQ...")
     try:
-        subprocess.run(
-            ["sudo", "dpkg", "-i", str(deb_path)],
-            check=True,
-            capture_output=True,
-        )
-        print("  ✓ LinuxQQ 安装完成（系统级）")
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        # Fallback: try apt
-        try:
-            subprocess.run(
-                ["sudo", "apt", "install", "-y", str(deb_path)],
-                check=True,
-                capture_output=True,
+        if shutil.which("apt-get"):
+            _run_privileged(
+                ["apt-get", "install", "-y", "--no-install-recommends", *_LINUXQQ_DEB_DEPS]
             )
-            print("  ✓ LinuxQQ 安装完成（系统级）")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("  ⚠ 自动安装失败，请手动安装:")
-            print(f"    sudo dpkg -i {deb_path}")
+            _run_privileged(["apt-get", "install", "-y", str(deb_path.resolve())])
+        else:
+            _run_privileged(["dpkg", "-i", str(deb_path)])
+        if not _linuxqq_installed():
+            raise SetupError("LinuxQQ 安装后仍找不到 /opt/QQ/qq")
+        print("  ✓ LinuxQQ 安装完成（系统级）")
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        print("  ⚠ 自动安装失败，请手动安装:")
+        if os.geteuid() == 0:
+            print(f"    apt-get install -y {deb_path}")
+        else:
+            print(f"    sudo apt-get install -y {deb_path}")
+        raise SetupError(f"LinuxQQ 安装失败: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------

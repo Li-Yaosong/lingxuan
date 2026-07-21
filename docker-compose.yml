@@ -1,0 +1,71 @@
+# 灵轩 Docker Compose 配置
+# ──────────────────────────────────────────────────────────────────────────────
+# 使用方式:
+#   1. 复制 .env.example 为 .env，填入必要配置
+#   2. 首次运行: docker compose up -d
+#   3. 查看 NapCat 日志扫码登录: docker compose logs -f lingxuan
+#   4. 后续启动: docker compose up -d
+#
+# 注意事项:
+#   - 首次启动会自动下载 NapCat + LinuxQQ (lingxuan napcat setup)
+#   - QQ 登录需要扫码，查看容器日志获取二维码
+#   - data/ 目录通过 volume 持久化，容器重建不丢失数据
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  lingxuan:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lingxuan:latest
+    container_name: lingxuan
+    restart: unless-stopped
+
+    # 从 .env 文件加载环境变量（敏感信息如 API Key 不应硬编码在此）
+    env_file:
+      - .env.docker
+
+    # 覆盖/补充环境变量（Docker 环境特有配置）
+    environment:
+      # 容器时区（日志与时间显示）
+      - TZ=Asia/Shanghai
+      # 管理面板绑定到所有接口（Docker 内需对外暴露）
+      - ADMIN_HOST=0.0.0.0
+      # NapCat 反向 WS 连接地址（容器内回环）
+      - NAPCAT_WS_URL=ws://127.0.0.1:8080/onebot/v11/ws
+      # 自动启动 NapCat
+      - NAPCAT_AUTO_START=true
+      # Docker 无头环境需要关闭 Chromium 沙箱，并用 Xvfb
+      - NAPCAT_NO_SANDBOX=true
+      - NAPCAT_USE_XVFB=true
+      # 数据目录（容器内路径）
+      - DATA_ROOT=./data
+      - DB_URL=sqlite+aiosqlite:///./data/lingxuan.db
+      - NAPCAT_DIR=./data/napcat
+      - NAPCAT_QQ_DIR=./data/qq
+
+    ports:
+      # NoneBot2 OneBot 反向 WS 端口（NapCat 连接用）
+      - "8080:8080"
+      # 管理面板端口
+      - "8081:8081"
+
+    volumes:
+      # 持久化数据：数据库、记忆、NapCat 配置与登录态
+      - lingxuan-data:/app/data
+
+    # 容器内需要 Xvfb 运行 QQ，需要一定的特权
+    # 如果 NapCat 无法启动，可尝试 privileged: true
+    privileged: true
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:8081/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  lingxuan-data:
+    name: lingxuan-data

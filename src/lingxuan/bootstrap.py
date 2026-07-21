@@ -95,7 +95,9 @@ async def _shutdown(container: Container) -> None:
 def _try_start_napcat(config: "ConfigProvider") -> None:
     """Try to auto-start NapCat in background mode.
 
-    Non-fatal: if NapCat is already running or can't start, just log a warning.
+    Runs ``napcat setup`` first when the launcher is missing (e.g. first
+    Docker start).  Non-fatal: if NapCat is already running or can't start,
+    just log a warning.
     """
     import os
     from pathlib import Path
@@ -111,7 +113,26 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
     if quick_account:
         os.environ.setdefault("NAPCAT_QUICK_ACCOUNT", quick_account)
 
-    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir)
+    launcher_so = napcat_dir / "libnapcat_launcher.so"
+    qq_bin = Path("/opt/QQ/qq")
+    if not launcher_so.exists() or not qq_bin.exists():
+        nonebot.logger.info("NapCat 未安装，开始自动 setup...")
+        from lingxuan.napcat.installer import SetupError, run_setup
+
+        try:
+            run_setup(
+                napcat_dir=napcat_dir,
+                qq_dir=qq_dir,
+                ws_url=config.get_str("NAPCAT_WS_URL"),
+            )
+        except SetupError as exc:
+            nonebot.logger.warning("NapCat 自动 setup 失败: {}", exc)
+            return
+        except Exception as exc:
+            nonebot.logger.warning("NapCat 自动 setup 失败: {}", exc)
+            return
+
+    manager = NapCatManager(napcat_dir=napcat_dir, qq_dir=qq_dir, config=config)
 
     if manager.is_running():
         nonebot.logger.info("NapCat 已在运行中，跳过自动启动")
@@ -119,10 +140,16 @@ def _try_start_napcat(config: "ConfigProvider") -> None:
 
     try:
         manager.start(foreground=False)
+        manager.schedule_post_login_config_repair()
+        manager.schedule_open_qrcode()
         if quick_account:
             nonebot.logger.info("NapCat 自动启动成功 (快速登录: {})", quick_account)
         else:
             nonebot.logger.info("NapCat 自动启动成功 (需扫码登录)")
+        nonebot.logger.info(
+            "若出现控制台二维码：桌面会尝试打开 data/napcat/cache/qrcode.png；"
+            "普通 QQ 窗口扫码通常无法给 NapCat 快速登录复用"
+        )
     except Exception as exc:
         nonebot.logger.warning("NapCat 自动启动失败: {}", exc)
 

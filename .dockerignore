@@ -1,0 +1,48 @@
+# Version control
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data (mounted as volume)
+data/
+
+# NapCat runtime (downloaded at setup, not baked into image)
+napcat/
+
+# Test / CI
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+
+# Documentation (not needed at runtime)
+docs/
+
+# Claude Code
+.claude/
+
+# Environment file (secrets — pass via docker-compose env_file or env vars)
+.env

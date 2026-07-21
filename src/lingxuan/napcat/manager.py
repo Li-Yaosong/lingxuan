@@ -1,7 +1,7 @@
-"""NapCat process manager: Xvfb + LD_PRELOAD lifecycle.
+"""NapCat process manager: optional Xvfb + LD_PRELOAD lifecycle.
 
 Manages the NapCatQQ process lifecycle:
-- Start Xvfb virtual framebuffer
+- Optionally start Xvfb virtual framebuffer (or use desktop DISPLAY)
 - Launch QQ with LD_PRELOAD injection
 - Stop via PID file + SIGTERM
 - Status check via PID file
@@ -51,6 +51,7 @@ class NapCatManager:
         self._logs_dir = napcat_dir / _LOGS_DIR
         self._xvfb_proc: subprocess.Popen | None = None
         self._qq_proc: subprocess.Popen | None = None
+        self._display: str = f":{_XVFB_DISPLAY}"
 
     def _get_config_str(self, key: str, default: str = "") -> str:
         """Read a config value, falling back to os.environ then default."""
@@ -61,10 +62,22 @@ class NapCatManager:
                 pass
         return os.environ.get(key, default)
 
+    def _get_config_bool(self, key: str, default: bool = False) -> bool:
+        """Read a bool config value, falling back to os.environ then default."""
+        if self._config is not None:
+            try:
+                return self._config.get_bool(key)
+            except KeyError:
+                pass
+        raw = os.environ.get(key)
+        if raw is None:
+            return default
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+
     # ── start ──────────────────────────────────────────────────────────
 
     def start(self, *, foreground: bool = False) -> None:
-        """Start NapCat (Xvfb + QQ with LD_PRELOAD).
+        """Start NapCat (optional Xvfb + QQ with LD_PRELOAD).
 
         In foreground mode, logs stream to the console (useful for QR code).
         In background mode, logs go to the logs directory.
@@ -75,9 +88,18 @@ class NapCatManager:
 
         self._logs_dir.mkdir(parents=True, exist_ok=True)
 
-        # 1. Start Xvfb
-        print("→ 启动 Xvfb...")
-        self._start_xvfb()
+        use_xvfb = self._get_config_bool("NAPCAT_USE_XVFB", default=True)
+        if use_xvfb:
+            print("→ 启动 Xvfb...")
+            self._start_xvfb()
+            self._display = f":{_XVFB_DISPLAY}"
+        else:
+            self._display = self._get_config_str("DISPLAY") or os.environ.get("DISPLAY", "")
+            if not self._display:
+                raise RuntimeError(
+                    "NAPCAT_USE_XVFB=false 但未设置 DISPLAY，无法在桌面显示 QQ 窗口。"
+                )
+            print(f"→ 使用桌面显示 {self._display}（不启动 Xvfb）")
 
         # 2. Launch QQ with LD_PRELOAD
         print("→ 启动 NapCat (LD_PRELOAD)...")
@@ -93,6 +115,99 @@ class NapCatManager:
             print("  扫码登录后，NapCat 将自动连接灵轩。")
             print("  按 Ctrl+C 停止 NapCat。")
             print()
+
+    def start_gui_login(self) -> None:
+        """Start plain LinuxQQ on the desktop display (no NapCat injection).
+
+        Use this when you want the normal QQ window for QR-code login.
+        After logging in and closing QQ, start NapCat via ``start()`` /
+        ``lingxuan run`` so it can quick-login with the cached session.
+        """
+        if self.is_running():
+            raise RuntimeError(
+                "NapCat/QQ 已在运行中 (PID {})。请先执行: lingxuan napcat stop".format(
+                    self._read_pid()
+                )
+            )
+
+        display = self._get_config_str("DISPLAY") or os.environ.get("DISPLAY", "")
+        if not display:
+            raise RuntimeError(
+                "未设置 DISPLAY，无法打开桌面 QQ 窗口。请在图形桌面终端中运行。"
+            )
+
+        qq_bin = self._find_qq_binary()
+        if qq_bin is None:
+            raise RuntimeError("找不到 QQ 可执行文件。请确认 LinuxQQ 已安装。")
+
+        env = os.environ.copy()
+        env["DISPLAY"] = display
+        # Ensure NapCat is NOT injected for GUI login.
+        env.pop("LD_PRELOAD", None)
+        env.pop("NAPCAT_BOOTMAIN", None)
+        env.pop("NAPCAT_WORKDIR", None)
+
+        qq_args = [str(qq_bin)]
+        if self._get_config_bool("NAPCAT_NO_SANDBOX", default=False):
+            qq_args.append("--no-sandbox")
+
+        print(f"→ 启动普通 QQ 窗口 (DISPLAY={display}，无 NapCat 注入)...")
+        print("  注意：普通 QQ 扫码留下的登录态，多数情况下不能被 NapCat 快速登录复用。")
+        print("  若 lingxuan run 仍提示扫码，请直接扫 NapCat 控制台/二维码图片。")
+        print("  登录成功后关闭 QQ，再执行: lingxuan run")
+        print()
+
+        self._qq_proc = subprocess.Popen(qq_args, env=env)
+        self._write_pid(self._qq_proc.pid)
+        print(f"✓ QQ 已启动 (PID {self._qq_proc.pid})")
+        print("  关闭 QQ 窗口或按 Ctrl+C 结束。")
+
+    def schedule_open_qrcode(self, *, timeout_s: float = 90.0) -> None:
+        """On desktop, open NapCat's QR image when it is (re)written.
+
+        NapCat writes ``cache/qrcode.png`` when interactive login is needed.
+        Opening it with the desktop image viewer is the practical alternative
+        to a normal QQ login window under LD_PRELOAD.
+        """
+        import threading
+
+        qr_path = self._napcat_dir / "cache" / "qrcode.png"
+        use_xvfb = self._get_config_bool("NAPCAT_USE_XVFB", default=True)
+        if use_xvfb:
+            return
+
+        display = self._display or os.environ.get("DISPLAY", "")
+        if not display:
+            return
+
+        def _worker() -> None:
+            deadline = time.time() + timeout_s
+            baseline = qr_path.stat().st_mtime if qr_path.exists() else 0.0
+            while time.time() < deadline:
+                time.sleep(1.0)
+                if not qr_path.exists():
+                    continue
+                try:
+                    mtime = qr_path.stat().st_mtime
+                except OSError:
+                    continue
+                if mtime <= baseline:
+                    continue
+                env = os.environ.copy()
+                env["DISPLAY"] = display
+                try:
+                    subprocess.Popen(
+                        ["xdg-open", str(qr_path)],
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    print(f"→ 已打开登录二维码图片: {qr_path}")
+                except OSError as exc:
+                    print(f"→ 无法自动打开二维码图片 ({exc})，请手动打开: {qr_path}")
+                return
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── stop ───────────────────────────────────────────────────────────
 
@@ -215,15 +330,20 @@ class NapCatManager:
         self._ensure_onebot11_configs()
 
         env = os.environ.copy()
-        env["DISPLAY"] = f":{_XVFB_DISPLAY}"
+        env["DISPLAY"] = self._display
         env["LD_PRELOAD"] = str(launcher_so.resolve())
         env["NAPCAT_WORKDIR"] = str(self._napcat_dir.resolve())
 
+        # Electron utility workers often do not inherit QQ's ``-q`` argv.
+        # Force single-process mode so NapCat can see ``-q`` / ``--qq``.
+        # NAPCAT_QUICK_ACCOUNT alone only works when WebUI is enabled.
+        env.setdefault("NAPCAT_DISABLE_MULTI_PROCESS", "1")
+
         # Auto-login: determine the QQ account for quick-login.
         # Priority: NAPCAT_QUICK_ACCOUNT env var > autoLoginAccount from webui.json.
-        # This works even when WebUI is disabled (unlike webui.json's
-        # autoLoginAccount which only takes effect through WebUI's quick function).
         # Requires a prior QR-code scan on this machine to cache the session.
+        # Note: with WebUI disabled, env-based quick login is a no-op in NapCat;
+        # the ``-q`` CLI flag (below) is the reliable path.
         auto_account = self._get_config_str("NAPCAT_QUICK_ACCOUNT").strip()
         if not auto_account:
             auto_account = self._read_auto_login_account()
@@ -240,8 +360,12 @@ class NapCatManager:
         if napcat_shell.is_dir():
             env["NAPCAT_BOOTMAIN"] = str(napcat_shell.resolve())
 
-        # Build command line: QQ --no-sandbox [-q <account>] for quick-login.
-        qq_args = [str(qq_bin), "--no-sandbox"]
+        # Build command line: QQ [--no-sandbox] [-q <account>] for quick-login.
+        # --no-sandbox is needed in Docker / headless Chromium sandboxes;
+        # desktop environments can set NAPCAT_NO_SANDBOX=false.
+        qq_args = [str(qq_bin)]
+        if self._get_config_bool("NAPCAT_NO_SANDBOX", default=False):
+            qq_args.append("--no-sandbox")
         if auto_account:
             qq_args.extend(["-q", auto_account])
 
@@ -278,6 +402,54 @@ class NapCatManager:
                 return p
 
         return None
+
+    def _needs_ws_repair(self) -> bool:
+        """Return True if any QQ-specific onebot11 config lacks the lingxuan WS client."""
+        import json
+
+        config_dir = self._napcat_dir / "config"
+        if not config_dir.is_dir():
+            return False
+
+        for config_file in config_dir.glob("onebot11_*.json"):
+            if config_file.name == "onebot11_.json":
+                continue
+            try:
+                data = json.loads(config_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                continue
+            clients = data.get("network", {}).get("websocketClients", [])
+            if not any(c.get("name") == "lingxuan" for c in clients):
+                return True
+        return False
+
+    def schedule_post_login_config_repair(self) -> None:
+        """Restart NapCat after first login if QQ-specific config dropped the WS client.
+
+        NapCat may create ``onebot11_<QQ>.json`` with an empty ``websocketClients``
+        array *after* startup.  We poll for a short window, patch the config, and
+        restart NapCat once so it reconnects to lingxuan.
+        """
+        import threading
+        import time
+
+        def _worker() -> None:
+            for _ in range(18):  # up to 3 minutes
+                time.sleep(10)
+                if not self.is_running():
+                    continue
+                if not self._needs_ws_repair():
+                    continue
+                self._ensure_onebot11_configs()
+                if self._needs_ws_repair():
+                    continue
+                print("→ NapCat 登录后已补全 OneBot 配置，重启 NapCat...")
+                self.stop()
+                time.sleep(2)
+                self.start(foreground=False)
+                return
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _ensure_onebot11_configs(self) -> None:
         """Patch all onebot11_*.json files to include the reverse WS client.

@@ -165,13 +165,11 @@ def get_launcher_cpp_url() -> str:
 def get_linuxqq_download_url() -> str:
     """Return the LinuxQQ .deb download URL for the current architecture.
 
-    Uses the official Tencent download API.
+    Uses Tencent's CDN (same pin as NapCat-Docker).
     """
     arch = detect_arch()
-    if arch == "x64":
-        # Tencent's official amd64 deb URL
-        return "https://dldir1.qq.com/qqfile/qq/QQNT/Linux/QQ_3.2.7_240422_amd64_01.deb"
-    # arm64 — may not be officially available
-    raise RuntimeError(
-        "LinuxQQ 官方暂无 arm64 deb 包，请手动安装 LinuxQQ 后重新运行 setup"
+    deb_arch = "amd64" if arch == "x64" else "arm64"
+    return (
+        "https://qqdl.gtimg.cn/qqfile/QQNT/9.9.32/beta/fd40a3ec/"
+        f"linuxqq_3.2.30-50969_{deb_arch}.deb"
     )
